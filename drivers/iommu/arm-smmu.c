@@ -1755,7 +1755,7 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 				dev_err(smmu->dev, "hard iova-to-phys (ATOS) failed\n");
 			dev_err(smmu->dev, "SID=0x%x\n", frsynra);
 		}
-		ret = IRQ_NONE;
+		ret = IRQ_HANDLED;
 		resume = RESUME_TERMINATE;
 		if (!non_fatal_fault) {
 			dev_err(smmu->dev,
@@ -3129,12 +3129,12 @@ static size_t arm_smmu_map_sg(struct iommu_domain *domain, unsigned long iova,
 
 out:
 	arm_smmu_assign_table(smmu_domain);
+	arm_smmu_secure_domain_unlock(smmu_domain);
 
 	if (size_to_unmap) {
 		arm_smmu_unmap(domain, __saved_iova_start, size_to_unmap);
 		iova = __saved_iova_start;
 	}
-	arm_smmu_secure_domain_unlock(smmu_domain);
 	arm_smmu_release_prealloc_memory(smmu_domain, &nonsecure_pool);
 	return iova - __saved_iova_start;
 }

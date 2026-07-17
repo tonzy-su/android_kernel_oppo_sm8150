@@ -1,4 +1,5 @@
-/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -50,6 +51,12 @@ static int cam_csiphy_notify_secure_mode(struct csiphy_device *csiphy_dev,
 		CAM_ERR(CAM_CSIPHY, "scm call to hypervisor failed");
 		return -EINVAL;
 	}
+
+	CAM_INFO(CAM_CSIPHY, "PHY : %d offset: %d SEC: %d Mask: %d",
+			csiphy_dev->soc_info.index,
+			offset,
+			protect,
+			csiphy_dev->csiphy_cpas_cp_reg_mask[offset]);
 
 	return 0;
 }
@@ -700,9 +707,11 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 			goto release_mutex;
 		}
 
-		if (csiphy_dev->acquire_count == 2) {
+		if ((csiphy_acq_params.combo_mode == 1 ||
+			csiphy_dev->is_acquired_dev_combo_mode == 1) &&
+			csiphy_dev->acquire_count == 2) {
 			CAM_ERR(CAM_CSIPHY,
-					"CSIPHY device do not allow more than 2 acquires");
+					"CSIPHY device do not allow more than 2 acquires in combo mode");
 			rc = -EINVAL;
 			goto release_mutex;
 		}
@@ -717,6 +726,33 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 			goto release_mutex;
 		}
 
+		csiphy_dev->share_count++;
+		if (csiphy_acq_params.combo_mode == 0
+				&& csiphy_dev->share_count > 1) {
+
+			rc = copy_from_user(&csiphy_acq_dev,
+				u64_to_user_ptr(cmd->handle),
+				sizeof(csiphy_acq_dev));
+			if (rc < 0) {
+				CAM_ERR(CAM_CSIPHY, "Failed copying from User");
+				csiphy_dev->share_count--;
+				goto release_mutex;
+			}
+			csiphy_acq_dev.device_handle =
+				csiphy_dev->bridge_intf.device_hdl[0];
+			if (copy_to_user(u64_to_user_ptr(cmd->handle),
+				&csiphy_acq_dev,
+				sizeof(struct cam_sensor_acquire_dev))) {
+				CAM_ERR(CAM_CSIPHY, "Failed copying to User");
+				rc = -EINVAL;
+				csiphy_dev->share_count--;
+				goto release_mutex;
+			}
+			CAM_DBG(CAM_CSIPHY, "Reuse device %d, skip acquire",
+					csiphy_acq_dev.device_handle);
+			goto release_mutex;
+		}
+
 		if ((csiphy_acq_params.combo_mode != 1) &&
 			(csiphy_dev->is_acquired_dev_combo_mode != 1) &&
 			(csiphy_dev->acquire_count == 1)) {
@@ -724,6 +760,7 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 				"Multiple Acquires are not allowed cm: %d acm: %d",
 				csiphy_acq_params.combo_mode,
 				csiphy_dev->is_acquired_dev_combo_mode);
+			csiphy_dev->share_count--;
 			rc = -EINVAL;
 			goto release_mutex;
 		}
@@ -737,12 +774,19 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 		if (csiphy_acq_params.combo_mode >= 2) {
 			CAM_ERR(CAM_CSIPHY, "Invalid combo_mode %d",
 				csiphy_acq_params.combo_mode);
+			csiphy_dev->share_count--;
 			rc = -EINVAL;
 			goto release_mutex;
 		}
 
 		csiphy_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
+		if (csiphy_acq_dev.device_handle <= 0) {
+			rc = -EFAULT;
+			CAM_ERR(CAM_CSIPHY, "Can not create device handle");
+			goto release_mutex;
+		}
+
 		bridge_intf = &csiphy_dev->bridge_intf;
 		bridge_intf->device_hdl[csiphy_acq_params.combo_mode]
 			= csiphy_acq_dev.device_handle;
@@ -754,6 +798,7 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 				sizeof(struct cam_sensor_acquire_dev))) {
 			CAM_ERR(CAM_CSIPHY, "Failed copying from User");
 			rc = -EINVAL;
+			csiphy_dev->share_count--;
 			goto release_mutex;
 		}
 		if (csiphy_acq_params.combo_mode == 1)
@@ -779,6 +824,11 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 		int32_t offset, rc = 0;
 		struct cam_start_stop_dev_cmd config;
 
+		if (csiphy_dev->is_acquired_dev_combo_mode == 0 &&
+				csiphy_dev->share_count > 1) {
+			CAM_DBG(CAM_CSIPHY, "Reuse device, skip stop");
+			goto release_mutex;
+		}
 		rc = copy_from_user(&config, (void __user *)cmd->handle,
 					sizeof(config));
 		if (rc < 0) {
@@ -837,7 +887,21 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 	}
 		break;
 	case CAM_RELEASE_DEV: {
+		int32_t offset;
 		struct cam_release_dev_cmd release;
+
+		if (csiphy_dev->share_count == 0) {
+			CAM_ERR(CAM_CSIPHY, "No valid devices to release");
+			rc = -EINVAL;
+			goto release_mutex;
+		}
+
+		csiphy_dev->share_count--;
+		if (csiphy_dev->is_acquired_dev_combo_mode == 0 ||
+				csiphy_dev->share_count > 0) {
+			CAM_DBG(CAM_CSIPHY, "Reuse device, skip release");
+			goto release_mutex;
+		}
 
 		if (!csiphy_dev->acquire_count) {
 			CAM_ERR(CAM_CSIPHY, "No valid devices to release");
@@ -851,6 +915,23 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 			rc = -EFAULT;
 			goto release_mutex;
 		}
+
+		offset = cam_csiphy_get_instance_offset(csiphy_dev,
+			release.dev_handle);
+		if (offset < 0 || offset >= CSIPHY_MAX_INSTANCES) {
+			CAM_ERR(CAM_CSIPHY, "Invalid offset");
+			goto release_mutex;
+		}
+
+		if (csiphy_dev->csiphy_info.secure_mode[offset])
+			cam_csiphy_notify_secure_mode(
+				csiphy_dev,
+				CAM_SECURE_MODE_NON_SECURE, offset);
+
+		csiphy_dev->csiphy_info.secure_mode[offset] =
+			CAM_SECURE_MODE_NON_SECURE;
+
+		csiphy_dev->csiphy_cpas_cp_reg_mask[offset] = 0x0;
 
 		rc = cam_destroy_device_hdl(release.dev_handle);
 		if (rc < 0)
@@ -887,6 +968,12 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 	case CAM_CONFIG_DEV: {
 		struct cam_config_dev_cmd config;
 
+		if (csiphy_dev->is_acquired_dev_combo_mode == 0 &&
+				csiphy_dev->share_count > 1) {
+			CAM_DBG(CAM_CSIPHY, "Reuse device, skip config");
+			goto release_mutex;
+		}
+
 		if (copy_from_user(&config,
 			u64_to_user_ptr(cmd->handle),
 					sizeof(config))) {
@@ -905,6 +992,12 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 		struct cam_axi_vote axi_vote;
 		struct cam_start_stop_dev_cmd config;
 		int32_t offset;
+
+		if (csiphy_dev->is_acquired_dev_combo_mode == 0 &&
+				csiphy_dev->share_count > 1) {
+			CAM_DBG(CAM_CSIPHY, "Reuse device, skip start");
+			goto release_mutex;
+		}
 
 		rc = copy_from_user(&config, (void __user *)cmd->handle,
 			sizeof(config));

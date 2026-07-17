@@ -515,7 +515,7 @@ static int mmc_devfreq_set_target(struct device *dev,
 		*freq, current->comm);
 
 	spin_lock_bh(&clk_scaling->lock);
-	if (clk_scaling->target_freq == *freq ||
+	if (clk_scaling->curr_freq == *freq ||
 		clk_scaling->skip_clk_scale_freq_update) {
 		spin_unlock_bh(&clk_scaling->lock);
 		goto out;
@@ -2074,7 +2074,7 @@ void mmc_set_data_timeout(struct mmc_data *data, const struct mmc_card *card)
 			 */
 			limit_us = 3000000;
 		else
-			limit_us = 100000;
+			limit_us = 200000;
 
 		/*
 		 * SDHC cards always use these fixed values.

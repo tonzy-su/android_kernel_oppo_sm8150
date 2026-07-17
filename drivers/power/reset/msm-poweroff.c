@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,6 +26,7 @@
 #include <linux/input/qpnp-power-on.h>
 #include <linux/of_address.h>
 #include <linux/syscore_ops.h>
+#include <linux/crash_dump.h>
 
 #include <asm/cacheflush.h>
 #include <asm/system_misc.h>
@@ -50,6 +51,7 @@
 #define SCM_WDOG_DEBUG_BOOT_PART	0x9
 #define SCM_DLOAD_FULLDUMP		0X10
 #define SCM_EDLOAD_MODE			0X01
+#define SCM_EDLOAD_PCI_MODE		0X04
 #define SCM_DLOAD_CMD			0x10
 #define SCM_DLOAD_MINIDUMP		0X20
 #define SCM_DLOAD_BOTHDUMPS	(SCM_DLOAD_MINIDUMP | SCM_DLOAD_FULLDUMP)
@@ -63,8 +65,11 @@ static bool scm_pmic_arbiter_disable_supported;
 static bool scm_deassert_ps_hold_supported;
 /* Download mode master kill-switch */
 static void __iomem *msm_ps_hold;
+static void __iomem *boot_config;
 static phys_addr_t tcsr_boot_misc_detect;
 static void scm_disable_sdi(void);
+static bool early_pcie_init_enable;
+static unsigned int boot_config_shift;
 
 /*
  * Runtime could be only changed value once.
@@ -257,9 +262,12 @@ static void enable_emergency_dload_mode(void)
 		/* Make sure all the cookied are flushed to memory */
 		mb();
 	}
-    
     qpnp_pon_wd_config(0);
-	ret = scm_set_dload_mode(SCM_EDLOAD_MODE, 0);
+	if (early_pcie_init_enable)
+		ret = scm_set_dload_mode(SCM_EDLOAD_PCI_MODE, 0);
+	else
+		ret = scm_set_dload_mode(SCM_EDLOAD_MODE, 0);
+
 	if (ret)
 		pr_err("Failed to set secure EDLOAD mode: %d\n", ret);
 }
@@ -368,8 +376,8 @@ static void msm_restart_prepare(const char *cmd)
 	 * Write download mode flags if restart_mode says so
 	 * Kill download mode if master-kill switch is set
 	 */
-
-	set_dload_mode(download_mode &&
+	if (!is_kdump_kernel())
+		set_dload_mode(download_mode &&
 			(in_panic || restart_mode == RESTART_DLOAD));
 #endif
 
@@ -739,6 +747,7 @@ static int msm_restart_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct resource *mem;
 	struct device_node *np;
+	uint32_t read_val;
 	int ret = 0;
 	
 #ifdef CONFIG_OPLUS_FEATURE_QCOM_MINIDUMP_ENHANCE
@@ -850,6 +859,35 @@ skip_sysfs_create:
 	if (mem)
 		tcsr_boot_misc_detect = mem->start;
 
+	early_pcie_init_enable = 0;
+	mem = platform_get_resource_byname(pdev, IORESOURCE_MEM, "boot-config");
+	if (mem) {
+		boot_config = devm_ioremap_resource(dev, mem);
+		if (IS_ERR(boot_config)) {
+			pr_err("unable to ioremap boot config offset\n");
+			return PTR_ERR(boot_config);
+		}
+
+		read_val = __raw_readl(boot_config);
+
+		boot_config_shift = 3;
+		np = of_find_compatible_node(NULL, NULL,
+				"qcom,pshold");
+		if (!np) {
+			pr_err("unable to find DT pshold\n");
+		} else {
+			ret = of_property_read_u32(np, "qcom,boot-config-shift",
+					&boot_config_shift);
+			if (ret)
+				pr_err("Unable to read boot_config_shift\n");
+		}
+
+		/* boot_config_shift provides the bit of BOOT_CONFIG register
+		 * which is used as PCIe_EARLY_INIT_EN.
+		 */
+		early_pcie_init_enable = (read_val >> boot_config_shift) & 1;
+	}
+
 	pm_power_off = do_msm_poweroff;
 	arm_pm_restart = do_msm_restart;
 
@@ -858,8 +896,8 @@ skip_sysfs_create:
 
 	if (scm_is_call_available(SCM_SVC_PWR, SCM_IO_DEASSERT_PS_HOLD) > 0)
 		scm_deassert_ps_hold_supported = true;
-
-	set_dload_mode(download_mode);
+	if (!is_kdump_kernel())
+		set_dload_mode(download_mode);
 	if (!download_mode)
 		scm_disable_sdi();
 

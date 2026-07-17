@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,6 +18,7 @@
 #include <linux/msm_gsi.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 #include "gsi.h"
 #include "gsi_reg.h"
 #include "gsi_emulation.h"
@@ -1269,9 +1270,10 @@ int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
 	__gsi_config_gen_irq(props->ee, ~0,
 		~GSI_EE_n_CNTXT_GSI_IRQ_CLR_GSI_BREAK_POINT_BMSK);
 
-	if (gsi_ctx->per.ver == GSI_VER_2_2)
+	if (gsi_ctx->per.ver == GSI_VER_2_2 || gsi_ctx->per.ver == GSI_VER_2_5)
 		__gsi_config_glob_irq(props->ee,
-			GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, 0);
+				GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, 0);
+
 	gsi_writel(props->intr, gsi_ctx->base +
 			GSI_EE_n_CNTXT_INTSET_OFFS(gsi_ctx->per.ee));
 	/* set GSI_TOP_EE_n_CNTXT_MSI_BASE_LSB/MSB to 0 */
@@ -2174,6 +2176,7 @@ static void gsi_program_chan_ctx(struct gsi_chan_props *props, unsigned int ee,
 	case GSI_CHAN_PROT_AQC:
 	case GSI_CHAN_PROT_11AD:
 	case GSI_CHAN_PROT_QDSS:
+	case GSI_CHAN_PROT_RTK:
 		prot_msb = 1;
 		break;
 	default:
@@ -2313,7 +2316,7 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 {
 	struct gsi_chan_ctx *ctx;
 	uint32_t val;
-	int res;
+	int res, size;
 	int ee;
 	enum gsi_ch_cmd_opcode op = GSI_CH_ALLOCATE;
 	uint8_t erindex;
@@ -2374,9 +2377,8 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 	if (props->prot == GSI_CHAN_PROT_GCI)
 		user_data_size += GSI_VEID_MAX;
 
-	user_data = devm_kzalloc(gsi_ctx->dev,
-		user_data_size * sizeof(*user_data),
-		GFP_KERNEL);
+	size = user_data_size * sizeof(*user_data);
+	user_data = kzalloc(size, GFP_KERNEL);
 	if (user_data == NULL) {
 		GSIERR("context not allocated\n");
 		return -GSI_STATUS_RES_ALLOC_FAILURE;
@@ -2401,14 +2403,14 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 		if (res == 0) {
 			GSIERR("chan_hdl=%u timed out\n", props->ch_id);
 			mutex_unlock(&gsi_ctx->mlock);
-			devm_kfree(gsi_ctx->dev, user_data);
+			kfree(user_data);
 			return -GSI_STATUS_TIMED_OUT;
 		}
 		if (ctx->state != GSI_CHAN_STATE_ALLOCATED) {
 			GSIERR("chan_hdl=%u allocation failed state=%d\n",
 					props->ch_id, ctx->state);
 			mutex_unlock(&gsi_ctx->mlock);
-			devm_kfree(gsi_ctx->dev, user_data);
+			kfree(user_data);
 			return -GSI_STATUS_RES_ALLOC_FAILURE;
 		}
 		mutex_unlock(&gsi_ctx->mlock);
@@ -2421,7 +2423,7 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 		GSI_NO_EVT_ERINDEX;
 	if (erindex != GSI_NO_EVT_ERINDEX && erindex >= GSI_EVT_RING_MAX) {
 		GSIERR("invalid erindex %u\n", erindex);
-		devm_kfree(gsi_ctx->dev, user_data);
+		kfree(user_data);
 		return -GSI_STATUS_INVALID_PARAMS;
 	}
 
@@ -3257,7 +3259,7 @@ int gsi_dealloc_channel(unsigned long chan_hdl)
 								ctx->state);
 		mutex_unlock(&gsi_ctx->mlock);
 	}
-	devm_kfree(gsi_ctx->dev, ctx->user_data);
+	kfree(ctx->user_data);
 	ctx->allocated = false;
 	if (ctx->evtr && (ctx->props.prot != GSI_CHAN_PROT_GCI))
 		atomic_dec(&ctx->evtr->chan_ref_cnt);
@@ -4215,7 +4217,7 @@ int gsi_halt_channel_ee(unsigned int chan_idx, unsigned int ee, int *code)
 	}
 
 	mutex_lock(&gsi_ctx->mlock);
-	if (gsi_ctx->per.ver == GSI_VER_2_2)
+	if (gsi_ctx->per.ver == GSI_VER_2_2 || gsi_ctx->per.ver == GSI_VER_2_5)
 		__gsi_config_glob_irq(gsi_ctx->per.ee,
 			GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, ~0);
 	reinit_completion(&gsi_ctx->gen_ee_cmd_compl);
@@ -4263,7 +4265,7 @@ int gsi_halt_channel_ee(unsigned int chan_idx, unsigned int ee, int *code)
 	res = GSI_STATUS_SUCCESS;
 	*code = gsi_ctx->scratch.word0.s.generic_ee_cmd_return_code;
 free_lock:
-	if (gsi_ctx->per.ver == GSI_VER_2_2)
+	if (gsi_ctx->per.ver == GSI_VER_2_2 || gsi_ctx->per.ver == GSI_VER_2_5)
 		__gsi_config_glob_irq(gsi_ctx->per.ee,
 			GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, 0);
 	mutex_unlock(&gsi_ctx->mlock);
@@ -4288,7 +4290,7 @@ int gsi_alloc_channel_ee(unsigned int chan_idx, unsigned int ee, int *code)
 		return gsi_alloc_ap_channel(chan_idx);
 
 	mutex_lock(&gsi_ctx->mlock);
-	if (gsi_ctx->per.ver == GSI_VER_2_2)
+	if (gsi_ctx->per.ver == GSI_VER_2_2 || gsi_ctx->per.ver == GSI_VER_2_5)
 		__gsi_config_glob_irq(gsi_ctx->per.ee,
 			GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, ~0);
 	reinit_completion(&gsi_ctx->gen_ee_cmd_compl);
@@ -4338,7 +4340,7 @@ int gsi_alloc_channel_ee(unsigned int chan_idx, unsigned int ee, int *code)
 	res = GSI_STATUS_SUCCESS;
 	*code = gsi_ctx->scratch.word0.s.generic_ee_cmd_return_code;
 free_lock:
-	if (gsi_ctx->per.ver == GSI_VER_2_2)
+	if (gsi_ctx->per.ver == GSI_VER_2_2 || gsi_ctx->per.ver == GSI_VER_2_5)
 		__gsi_config_glob_irq(gsi_ctx->per.ee,
 			GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, 0);
 	mutex_unlock(&gsi_ctx->mlock);
@@ -4376,6 +4378,9 @@ int gsi_enable_flow_control_ee(unsigned int chan_idx, unsigned int ee,
 	}
 
 	mutex_lock(&gsi_ctx->mlock);
+	if (gsi_ctx->per.ver == GSI_VER_2_2 || gsi_ctx->per.ver == GSI_VER_2_5)
+		__gsi_config_glob_irq(gsi_ctx->per.ee,
+			GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, ~0);
 	reinit_completion(&gsi_ctx->gen_ee_cmd_compl);
 
 	/* invalidate the response */
@@ -4442,6 +4447,9 @@ int gsi_enable_flow_control_ee(unsigned int chan_idx, unsigned int ee,
 	}
 	*code = gsi_ctx->scratch.word0.s.generic_ee_cmd_return_code;
 free_lock:
+	if (gsi_ctx->per.ver == GSI_VER_2_2 || gsi_ctx->per.ver == GSI_VER_2_5)
+		__gsi_config_glob_irq(gsi_ctx->per.ee,
+			GSI_EE_n_CNTXT_GLOB_IRQ_EN_GP_INT1_BMSK, 0);
 	mutex_unlock(&gsi_ctx->mlock);
 
 	return res;
@@ -4483,6 +4491,35 @@ void gsi_wdi3_write_evt_ring_db(unsigned long evt_ring_hdl,
 		GSI_EE_n_EV_CH_k_CNTXT_13_OFFS(evt_ring_hdl, gsi_ctx->per.ee));
 }
 EXPORT_SYMBOL(gsi_wdi3_write_evt_ring_db);
+
+int gsi_get_refetch_reg(unsigned long chan_hdl, bool is_rp)
+{
+	if (is_rp) {
+		return gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_RE_FETCH_READ_PTR_OFFS(chan_hdl,
+			gsi_ctx->per.ee));
+	} else {
+		return gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_CH_k_RE_FETCH_WRITE_PTR_OFFS(chan_hdl,
+			gsi_ctx->per.ee));
+	}
+}
+EXPORT_SYMBOL(gsi_get_refetch_reg);
+
+int gsi_get_drop_stats(unsigned long ep_id, int scratch_id)
+{
+	/* RTK use scratch 5 */
+	if (scratch_id == 5) {
+		/*
+		 * Read the address of GSI_SHRAM_n (0x1e06000)
+		 * and then add (physical_ch_idx * 12 + 7) in words
+		 */
+		return gsi_readl(gsi_ctx->base +
+		GSI_EE_n_GSI_SHRAM_n_OFFS(ep_id * 12 + 7));
+	}
+	return 0;
+}
+EXPORT_SYMBOL(gsi_get_drop_stats);
 
 void gsi_wdi3_dump_register(unsigned long chan_hdl)
 {

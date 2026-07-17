@@ -99,7 +99,7 @@
 
 		qcom,macrotiling-channels = <8>;
 
-		qcom,snapshot-size = <1048576>; /* bytes */
+		qcom,snapshot-size = <0x200000>; /* bytes */
 
 		qcom,gpu-qdss-stm = <0x161c0000 0x40000>; /* base addr, size */
 
@@ -263,6 +263,7 @@
 		qcom,secure_align_mask = <0xfff>;
 		qcom,retention;
 		qcom,hyp_secure_alloc;
+		qcom,secure-size = <0x20000000>; /* 512MB */
 
 		gfx3d_user: gfx3d_user {
 			compatible = "qcom,smmu-kgsl-cb";

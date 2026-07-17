@@ -17,6 +17,12 @@
 
 #include <linux/pci.h>
 #include <linux/msi.h>
+#include <linux/skbuff.h>
+#include <linux/netdevice.h>
+
+#ifndef IS_REACHABLE
+#define IS_REACHABLE defined
+#endif
 
 /* If the kernel is not RHEL / CentOS, then the 2 identifiers below will be
  * undefined. Define them this way to simplify the checks below.
@@ -41,6 +47,21 @@
 
 /* introduced in commit 72bb68721f80a1441e871b6afc9ab0b3793d5031 */
 #define ATL_HAVE_IPV6_NTUPLE
+#if RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(7, 3)
+static inline void ethtool_convert_legacy_u32_to_link_mode(unsigned long *dst,
+						    u32 legacy_u32)
+{
+	bitmap_zero(dst, __ETHTOOL_LINK_MODE_MASK_NBITS);
+	dst[0] = legacy_u32;
+}
+#endif
+#else
+#define __ETHTOOL_DECLARE_LINK_MODE_MASK(VAR) unsigned long VAR[1]
+static inline void ethtool_convert_legacy_u32_to_link_mode(unsigned long *dst,
+						    u32 legacy_u32)
+{
+	dst[0] = legacy_u32;
+}
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,19,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3)
@@ -107,7 +128,7 @@ static inline int skb_xmit_more(struct sk_buff *skb)
 {
 	return 0;
 }
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,2,0)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8, 2)
 static inline int skb_xmit_more(struct sk_buff *skb)
 {
 	return netdev_xmit_more();

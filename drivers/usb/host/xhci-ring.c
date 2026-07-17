@@ -2868,7 +2868,7 @@ irqreturn_t xhci_irq(struct usb_hcd *hcd)
 	 * that clears the EHB.
 	 */
 	while (xhci_handle_event(xhci) > 0) {
-		if (event_loop++ < TRBS_PER_SEGMENT / 2)
+		if (event_loop++ < TRBS_PER_SEGMENT / 16)
 			continue;
 		xhci_update_erst_dequeue(xhci, event_ring_deq);
 		event_loop = 0;
@@ -3403,8 +3403,8 @@ int xhci_queue_bulk_tx(struct xhci_hcd *xhci, gfp_t mem_flags,
 			/* New sg entry */
 			--num_sgs;
 			sent_len -= block_len;
-			if (num_sgs != 0) {
-				sg = sg_next(sg);
+			sg = sg_next(sg);
+			if (num_sgs != 0 && sg) {
 				block_len = sg_dma_len(sg);
 				addr = (u64) sg_dma_address(sg);
 				addr += sent_len;

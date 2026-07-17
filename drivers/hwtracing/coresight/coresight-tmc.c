@@ -187,7 +187,7 @@ static int tmc_read_prepare(struct tmc_drvdata *drvdata)
 {
 	int ret = 0;
 
-	if (!drvdata->enable)
+	if (!drvdata->enable || !drvdata->csdev->enable)
 		return -EPERM;
 
 	switch (drvdata->config_type) {
@@ -211,6 +211,9 @@ static int tmc_read_prepare(struct tmc_drvdata *drvdata)
 static int tmc_read_unprepare(struct tmc_drvdata *drvdata)
 {
 	int ret = 0;
+
+	if (!drvdata->csdev->enable)
+		return -EPERM;
 
 	switch (drvdata->config_type) {
 	case TMC_CONFIG_TYPE_ETB:
@@ -765,7 +768,7 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 			drvdata->size = SZ_1M;
 
 		drvdata->out_mode = TMC_ETR_OUT_MODE_MEM;
-		drvdata->pcie_path = TMC_ETR_PCIE_HW_PATH;
+		drvdata->pcie_path = TMC_ETR_PCIE_SW_PATH;
 	} else {
 		drvdata->size = readl_relaxed(drvdata->base + TMC_RSZ) * 4;
 	}

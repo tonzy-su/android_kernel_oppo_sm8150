@@ -1,4 +1,5 @@
-/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -134,6 +135,9 @@
 #define QPNP_GEN2_POFF_SEQ			BIT(7)
 #define QPNP_GEN2_FAULT_SEQ			BIT(6)
 #define QPNP_GEN2_S3_RESET_SEQ			BIT(5)
+#define QPNP_GEN2_IMMEDIATE_XVDD_SHUTDOWN_SEQ	BIT(4)
+#define QPNP_GEN2_RAW_DVDD_RB_OCCURRED_SEQ	BIT(3)
+#define QPNP_GEN2_RAW_XVDD_RB_OCCURRED_SEQ	BIT(2)
 
 #define QPNP_PON_S3_SRC_KPDPWR			0
 #define QPNP_PON_S3_SRC_RESIN			1
@@ -284,6 +288,7 @@ static const char * const qpnp_pon_reason[] = {
 
 #define POFF_REASON_FAULT_OFFSET	16
 #define POFF_REASON_S3_RESET_OFFSET	32
+#define POFF_REASON_OFFSET		40
 static const char * const qpnp_poff_reason[] = {
 	/* QPNP_PON_GEN1 POFF reasons */
 	[0] = "Triggered from SOFT (Software)",
@@ -330,6 +335,13 @@ static const char * const qpnp_poff_reason[] = {
 	[37] = "Triggered from S3_RESET_PBS_WATCHDOG_TO",
 	[38] = "Triggered from S3_RESET_PBS_NACK",
 	[39] = "Triggered from S3_RESET_KPDPWR_ANDOR_RESIN",
+
+	/*RAW_DVDD_RB, RAW_XVDD_RB and XVDD_SHUTDOWN reason*/
+	[40] = "N/A",
+	[41] = "N/A",
+	[42] = "Triggered from RAW_XVDD_RB_OCCURRED",
+	[43] = "Triggered from RAW_DVDD_RB_OCCURRED",
+	[44] = "Triggered from IMMEDIATE_XVDD_SHUTDOWN S2 Reset",
 };
 
 static int qpnp_pon_store_reg(struct qpnp_pon *pon, u16 addr)
@@ -578,6 +590,8 @@ static int qpnp_pon_reset_config(struct qpnp_pon *pon,
 	bool disable = false;
 	u16 rst_en_reg;
 	struct qpnp_pon_config *cfg;
+	u8 pon_kpd_rt_bit = (QPNP_PON_KPDPWR_N_SET | QPNP_PON_CBLPWR_N_SET);
+	uint pon_rt_sts = 0;
 
 	/* Ignore the PS_HOLD reset config if TWM ENTRY is enabled */
 	if (pon->support_twm_config && pon->twm_state == PMIC_TWM_ENABLE) {
@@ -599,6 +613,14 @@ static int qpnp_pon_reset_config(struct qpnp_pon *pon,
 				pr_err("Unable to config KPDPWR_N S2 for hard-reset rc=%d\n",
 					rc);
 		}
+
+		do {
+			/* make sure no key is pressed */
+			rc = qpnp_pon_read(pon, QPNP_PON_RT_STS(pon),
+							&pon_rt_sts);
+			if (rc < 0)
+				pr_err("Unable to read PON_RT_STS rc=%d\n", rc);
+		} while (pon_rt_sts & pon_kpd_rt_bit);
 
 		pr_crit("PMIC configured for TWM entry\n");
 		return 0;
@@ -2058,7 +2080,8 @@ static void qpnp_pon_debugfs_remove(struct qpnp_pon *pon)
 static int qpnp_pon_read_gen2_pon_off_reason(struct qpnp_pon *pon, u16 *reason,
 					int *reason_index_offset)
 {
-	unsigned int buf[2], reg;
+	unsigned int reg, reg1;
+	u8 buf[2];
 	int rc;
 
 	rc = qpnp_pon_read(pon, QPNP_PON_OFF_REASON(pon), &reg);
@@ -2066,10 +2089,10 @@ static int qpnp_pon_read_gen2_pon_off_reason(struct qpnp_pon *pon, u16 *reason,
 		return rc;
 
 	if (reg & QPNP_GEN2_POFF_SEQ) {
-		rc = qpnp_pon_read(pon, QPNP_POFF_REASON1(pon), buf);
+		rc = qpnp_pon_read(pon, QPNP_POFF_REASON1(pon), &reg1);
 		if (rc)
 			return rc;
-		*reason = (u8)buf[0];
+		*reason = (u8)reg1;
 		*reason_index_offset = 0;
 	} else if (reg & QPNP_GEN2_FAULT_SEQ) {
 		rc = regmap_bulk_read(pon->regmap, QPNP_FAULT_REASON1(pon), buf,
@@ -2079,14 +2102,19 @@ static int qpnp_pon_read_gen2_pon_off_reason(struct qpnp_pon *pon, u16 *reason,
 				QPNP_FAULT_REASON1(pon), rc);
 			return rc;
 		}
-		*reason = (u8)buf[0] | (u16)(buf[1] << 8);
+		*reason = buf[0] | (u16)(buf[1] << 8);
 		*reason_index_offset = POFF_REASON_FAULT_OFFSET;
 	} else if (reg & QPNP_GEN2_S3_RESET_SEQ) {
-		rc = qpnp_pon_read(pon, QPNP_S3_RESET_REASON(pon), buf);
+		rc = qpnp_pon_read(pon, QPNP_S3_RESET_REASON(pon), &reg1);
 		if (rc)
 			return rc;
-		*reason = (u8)buf[0];
+		*reason = (u8)reg1;
 		*reason_index_offset = POFF_REASON_S3_RESET_OFFSET;
+	} else if ((reg & QPNP_GEN2_RAW_XVDD_RB_OCCURRED_SEQ) ||
+		   (reg & QPNP_GEN2_RAW_DVDD_RB_OCCURRED_SEQ) ||
+		   (reg & QPNP_GEN2_IMMEDIATE_XVDD_SHUTDOWN_SEQ)) {
+		*reason = (u8)reg;
+		*reason_index_offset = POFF_REASON_OFFSET;
 	}
 
 	return 0;
@@ -2196,7 +2224,7 @@ static int qpnp_pon_read_hardware_info(struct qpnp_pon *pon, bool sys_reset)
 {
 	struct device *dev = pon->dev;
 	unsigned int reg = 0;
-	unsigned int buf[2];
+	u8 buf[2];
 	int reason_index_offset = 0;
 	unsigned int pon_sts = 0;
 	u16 poff_sts = 0;
@@ -2300,10 +2328,11 @@ static int qpnp_pon_read_hardware_info(struct qpnp_pon *pon, bool sys_reset)
 #endif /*OPLUS_BUG_STABILITY*/
 			return rc;
 		}
-		poff_sts = buf[0] | (buf[1] << 8);
+		poff_sts = buf[0] | (u16)(buf[1] << 8);
 	}
 	index = ffs(poff_sts) - 1 + reason_index_offset;
-	if (index >= ARRAY_SIZE(qpnp_poff_reason) || index < 0) {
+	if (index >= ARRAY_SIZE(qpnp_poff_reason) || index < 0 ||
+					index < reason_index_offset) {
 		dev_info(dev, "PMIC@SID%d: Unknown power-off reason\n",
 			 to_spmi_device(dev->parent)->usid);
 #ifdef OPLUS_BUG_STABILITY

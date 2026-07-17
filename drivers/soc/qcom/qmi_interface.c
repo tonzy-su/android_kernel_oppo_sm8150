@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017 Linaro Ltd.
+ * Copyright (c) 2021 The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -408,10 +409,10 @@ static void qmi_invoke_handler(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 			break;
 	}
 
-	if (!handler->fn)
+	if (!handler->fn || !handler->decoded_size)
 		return;
 
-	dest = kzalloc(handler->decoded_size, GFP_KERNEL);
+	dest = vzalloc(handler->decoded_size);
 	if (!dest)
 		return;
 
@@ -421,7 +422,7 @@ static void qmi_invoke_handler(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 	else
 		handler->fn(qmi, sq, txn, dest);
 
-	kfree(dest);
+	vfree(dest);
 }
 
 /**
@@ -662,10 +663,11 @@ int qmi_handle_init(struct qmi_handle *qmi, size_t recv_buf_size,
 	if (ops)
 		qmi->ops = *ops;
 
+	/* Make room for the header */
+	recv_buf_size += sizeof(struct qmi_header);
+	/* Must also be sufficient to hold a control packet */
 	if (recv_buf_size < sizeof(struct qrtr_ctrl_pkt))
 		recv_buf_size = sizeof(struct qrtr_ctrl_pkt);
-	else
-		recv_buf_size += sizeof(struct qmi_header);
 
 	qmi->recv_buf_size = recv_buf_size;
 	qmi->recv_buf = kzalloc(recv_buf_size, GFP_KERNEL);
@@ -801,7 +803,7 @@ static ssize_t qmi_send_message(struct qmi_handle *qmi,
 	}
 	mutex_unlock(&qmi->sock_lock);
 
-	kfree(msg);
+	vfree(msg);
 
 	return ret < 0 ? ret : 0;
 }

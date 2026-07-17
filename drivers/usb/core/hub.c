@@ -29,6 +29,7 @@
 #include <linux/mutex.h>
 #include <linux/random.h>
 #include <linux/pm_qos.h>
+#include <soc/qcom/boot_stats.h>
 
 #include <linux/uaccess.h>
 #include <asm/byteorder.h>
@@ -38,6 +39,7 @@
 
 #define USB_VENDOR_GENESYS_LOGIC		0x05e3
 #define USB_VENDOR_SMSC				0x0424
+#define USB_PRODUCT_USB5534B			0x5534
 #define HUB_QUIRK_CHECK_PORT_AUTOSUSPEND	0x01
 #define HUB_QUIRK_DISABLE_AUTOSUSPEND		0x02
 
@@ -5349,8 +5351,11 @@ out_hdev_lock:
 }
 
 static const struct usb_device_id hub_id_table[] = {
-    { .match_flags = USB_DEVICE_ID_MATCH_VENDOR | USB_DEVICE_ID_MATCH_INT_CLASS,
+    { .match_flags = USB_DEVICE_ID_MATCH_VENDOR
+                   | USB_DEVICE_ID_MATCH_PRODUCT
+                   | USB_DEVICE_ID_MATCH_INT_CLASS,
       .idVendor = USB_VENDOR_SMSC,
+      .idProduct = USB_PRODUCT_USB5534B,
       .bInterfaceClass = USB_CLASS_HUB,
       .driver_info = HUB_QUIRK_DISABLE_AUTOSUSPEND},
     { .match_flags = USB_DEVICE_ID_MATCH_VENDOR
@@ -5545,6 +5550,7 @@ static int usb_reset_and_verify_device(struct usb_device *udev)
 	struct usb_hcd			*hcd = bus_to_hcd(udev->bus);
 	struct usb_device_descriptor	descriptor = udev->descriptor;
 	struct usb_host_bos		*bos;
+	char				buf[50];
 	int				i, j, ret = 0;
 	int				port1 = udev->portnum;
 
@@ -5631,6 +5637,15 @@ static int usb_reset_and_verify_device(struct usb_device *udev)
 	}
 	mutex_unlock(hcd->bandwidth_mutex);
 	usb_set_device_state(udev, USB_STATE_CONFIGURED);
+
+	/* Skip this marker for root-hubs */
+	if (udev->parent != NULL) {
+		scnprintf(buf, sizeof(buf),
+				"USB device reset with VID=%04x, PID=%04x ",
+				le16_to_cpu(udev->descriptor.idVendor),
+				le16_to_cpu(udev->descriptor.idProduct));
+		update_marker(buf);
+	}
 
 	/* Put interfaces back into the same altsettings as before.
 	 * Don't bother to send the Set-Interface request for interfaces

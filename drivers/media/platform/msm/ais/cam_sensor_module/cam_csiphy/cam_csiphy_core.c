@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2020, 2022 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -84,6 +84,27 @@ void cam_csiphy_query_cap(struct csiphy_device *csiphy_dev,
 	csiphy_cap->version = csiphy_dev->hw_version;
 	csiphy_cap->clk_lane = csiphy_dev->clk_lane;
 }
+
+static void cam_csiphy_query_diagnostic_info(struct csiphy_device *csiphy_dev,
+	struct csiphy_diag_info *csiphyDiag)
+{
+	uint8_t i;
+	struct cam_hw_soc_info *soc_info = NULL;
+	struct csiphy_reg_parms_t *csiphy_reg = NULL;
+	void __iomem *base = NULL;
+
+	soc_info = &csiphy_dev->soc_info;
+	base =  csiphy_dev->soc_info.reg_map[0].mem_base;
+	csiphy_reg = &csiphy_dev->ctrl_reg->csiphy_reg;
+
+	for (i = 0; i < csiphy_dev->num_irq_registers; i++) {
+		csiphyDiag->status[i] =  cam_io_r_mb(base +
+			csiphy_reg->mipi_csiphy_interrupt_status0_addr +
+			(0x4 * i));
+	}
+
+}
+
 
 void cam_csiphy_reset(struct csiphy_device *csiphy_dev)
 {
@@ -742,6 +763,12 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 
 		csiphy_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
+		if (csiphy_acq_dev.device_handle <= 0) {
+			rc = -EFAULT;
+			CAM_ERR(CAM_CSIPHY, "Can not create device handle");
+			goto release_mutex;
+		}
+
 		bridge_intf = &csiphy_dev->bridge_intf;
 		bridge_intf->device_hdl[csiphy_acq_params.combo_mode]
 			= csiphy_acq_dev.device_handle;
@@ -983,6 +1010,18 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 			rc = -EFAULT;
 		} else {
 			rc = cam_csiphy_external_cmd(csiphy_dev, &submit_cmd);
+		}
+		break;
+	}
+	case CAM_DIAG_INFO: {
+		struct csiphy_diag_info csiphyDiag = {0};
+
+		cam_csiphy_query_diagnostic_info(csiphy_dev, &csiphyDiag);
+		if (copy_to_user(u64_to_user_ptr(cmd->handle),
+			&csiphyDiag, sizeof(struct csiphy_diag_info))) {
+			CAM_ERR(CAM_CSIPHY, "Failed copying from User");
+			rc = -EINVAL;
+			goto release_mutex;
 		}
 		break;
 	}

@@ -167,6 +167,7 @@
 #define GEN2_U3_EXIT_RSP_RX_CLK_MASK	GEN2_U3_EXIT_RSP_RX_CLK(0xff)
 #define GEN1_U3_EXIT_RSP_RX_CLK(n)	(n)
 #define GEN1_U3_EXIT_RSP_RX_CLK_MASK	GEN1_U3_EXIT_RSP_RX_CLK(0xff)
+#define DWC3_LLUCTL(n)			(0xd024 + ((n) * 0x80))
 #define DWC31_LINK_GDBGLTSSM(n)		(0xd050 + ((n) * 0x80))
 
 /* Bit fields */
@@ -512,6 +513,9 @@
 #define DWC_CTRL_COUNT	10
 #define NUM_LOG_PAGES	12
 
+/* Force Gen1 speed on Gen2 link */
+#define DWC3_FORCE_GEN1			BIT(10)
+
 /* Structures */
 
 struct dwc3_trb;
@@ -674,6 +678,7 @@ struct dwc3_ep {
 	struct dwc3_ep_events	dbg_ep_events_diff;
 	struct timespec		dbg_ep_events_ts;
 	int			fifo_depth;
+	bool			disable_in_progress;
 };
 
 enum dwc3_phy {
@@ -1006,6 +1011,9 @@ struct dwc3_scratchpad_array {
  * @last_run_stop: timestamp denoting the last run_stop update
  * @num_gsi_eps: number of GSI based hardware accelerated endpoints
  * @dual_port: If true, this core supports two ports
+ * @force_gen1: use to force gen1 speed on gen2 controller
+ * @active_highbw_isoc: if true, high bandwidth isochronous endpoint is active.
+ * @ignore_statusirq: if true, ignore irq triggered for status stage.
  */
 struct dwc3 {
 	struct work_struct	drd_work;
@@ -1151,6 +1159,7 @@ struct dwc3 {
 	unsigned		pullups_connected:1;
 	unsigned		setup_packet_pending:1;
 	unsigned		three_stage_setup:1;
+	unsigned		usb2_gadget_lpm_disable:1;
 	unsigned		usb3_lpm_capable:1;
 
 	unsigned		disable_scramble_quirk:1;
@@ -1177,6 +1186,7 @@ struct dwc3 {
 	unsigned		disable_clk_gating:1;
 	unsigned		enable_bus_suspend:1;
 	unsigned		usb3_u1u2_disable:1;
+	unsigned		force_gen1:1;
 
 	atomic_t		in_lpm;
 	bool			b_suspend;
@@ -1229,6 +1239,8 @@ struct dwc3 {
 	ktime_t			last_run_stop;
 	u32			num_gsi_eps;
 	bool			dual_port;
+	bool			active_highbw_isoc;
+	bool			ignore_statusirq;
 };
 
 #define work_to_dwc(w)		(container_of((w), struct dwc3, drd_work))

@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -60,6 +60,7 @@ int pixel_div_get_div(void *context, unsigned int reg,
 {
 	int rc;
 	struct mdss_pll_resources *pll = context;
+	struct dsi_pll_db *pdb = (struct dsi_pll_db *)pll->priv;
 	u32 val = 0;
 
 	if (is_gdsc_disabled(pll))
@@ -72,6 +73,10 @@ int pixel_div_get_div(void *context, unsigned int reg,
 	}
 
 	val = (MDSS_PLL_REG_R(pll->pll_base, DSIPHY_SSC9) & 0x7F);
+	if (!val) {
+		val = pdb->param.pixel_divhf;
+		MDSS_PLL_REG_W(pll->pll_base, DSIPHY_SSC9, val);
+	}
 	*div = val + 1;
 	pr_debug("pixel_div = %d\n", (*div));
 
@@ -306,7 +311,7 @@ static int dsi_pll_relock(struct mdss_pll_resources *pll)
 
 	data = MDSS_PLL_REG_R(pll_base, DSIPHY_PLL_POWERUP_CTRL);
 	data &= ~BIT(1); /* remove ONPLL_OVR_EN bit */
-	data |= 0x1; /* set ONPLL_OVN to 0x1 */
+	data &= ~BIT(0); /* clear ONPLL_OVN bit*/
 	MDSS_PLL_REG_W(pll_base, DSIPHY_PLL_POWERUP_CTRL, data);
 	ndelay(500); /* h/w recommended delay */
 	MDSS_PLL_REG_W(pll_base, DSIPHY_SYS_CTRL, 0x49);
@@ -954,6 +959,13 @@ int pll_vco_prepare_12nm(struct clk_hw *hw)
 	if (!pll) {
 		pr_err("Dsi pll resources are not available\n");
 		return -EINVAL;
+	}
+
+	/* Skip vco recalculation for continuous splash use case */
+	if (pll->handoff_resources) {
+		pr_debug("%s: Skip recalculation during cont splash\n",
+						__func__);
+		return rc;
 	}
 
 	pdb = (struct dsi_pll_db *)pll->priv;
