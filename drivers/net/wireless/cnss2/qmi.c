@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -154,6 +154,8 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	struct wlfw_host_cap_resp_msg_v01 *resp;
 	struct qmi_txn txn;
 	int ret = 0;
+	u64 iova_start = 0, iova_size = 0,
+	    iova_ipa_start = 0, iova_ipa_size = 0;
 
 	cnss_pr_dbg("Sending host capability message, state: 0x%lx\n",
 		    plat_priv->driver_state);
@@ -194,6 +196,17 @@ static int cnss_wlfw_host_cap_send_sync(struct cnss_plat_data *plat_priv)
 	req->cal_done_valid = 1;
 	req->cal_done = plat_priv->cal_done;
 	cnss_pr_dbg("Calibration done is %d\n", plat_priv->cal_done);
+
+	if (cnss_bus_is_smmu_s1_enabled(plat_priv) &&
+	    !cnss_bus_get_iova(plat_priv, &iova_start, &iova_size) &&
+	    !cnss_bus_get_iova_ipa(plat_priv, &iova_ipa_start,
+				   &iova_ipa_size)) {
+		req->ddr_range_valid = 1;
+		req->ddr_range[0].start = iova_start;
+		req->ddr_range[0].size = iova_size + iova_ipa_size;
+		cnss_pr_dbg("Sending iova starting 0x%llx with size 0x%llx\n",
+			    req->ddr_range[0].start, req->ddr_range[0].size);
+	}
 
 	ret = qmi_txn_init(&plat_priv->qmi_wlfw, &txn,
 			   wlfw_host_cap_resp_msg_v01_ei, resp);
@@ -1297,6 +1310,9 @@ static void cnss_wlfw_request_mem_ind_cb(struct qmi_handle *qmi_wlfw,
 			    ind_msg->mem_seg[i].size, ind_msg->mem_seg[i].type);
 		plat_priv->fw_mem[i].type = ind_msg->mem_seg[i].type;
 		plat_priv->fw_mem[i].size = ind_msg->mem_seg[i].size;
+		if (plat_priv->fw_mem[i].type == CNSS_MEM_TYPE_DDR)
+			plat_priv->fw_mem[i].attrs |=
+				DMA_ATTR_FORCE_CONTIGUOUS;
 	}
 
 	cnss_driver_event_post(plat_priv, CNSS_DRIVER_EVENT_REQUEST_MEM,
@@ -1726,9 +1742,18 @@ int cnss_qmi_init(struct cnss_plat_data *plat_priv)
 		cnss_pr_err("Failed to initialize QMI handle, err: %d\n", ret);
 		goto out;
 	}
-
-	ret = qmi_add_lookup(&plat_priv->qmi_wlfw, WLFW_SERVICE_ID_V01,
-			     WLFW_SERVICE_VERS_V01, WLFW_SERVICE_INS_ID_V01);
+	/* In order to support dual wlan card attach case,
+	 * need separate qmi service instance id for each dev
+	 */
+	if (plat_priv->qrtr_node_id != 0 &&
+	    plat_priv->wlfw_service_instance_id != 0)
+		ret = qmi_add_lookup(&plat_priv->qmi_wlfw, WLFW_SERVICE_ID_V01,
+				     WLFW_SERVICE_VERS_V01,
+				     plat_priv->wlfw_service_instance_id);
+	else
+		ret = qmi_add_lookup(&plat_priv->qmi_wlfw, WLFW_SERVICE_ID_V01,
+				     WLFW_SERVICE_VERS_V01,
+				     WLFW_SERVICE_INS_ID_V01);
 	if (ret < 0)
 		cnss_pr_err("Failed to add QMI lookup, err: %d\n", ret);
 

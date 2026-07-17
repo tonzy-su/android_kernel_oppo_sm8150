@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -583,6 +583,14 @@ static int msm_vidc_probe_vidc_device(struct platform_device *pdev)
 		goto err_enc;
 	}
 
+	/* setup the encoder device with cma */
+	rc = msm_vidc_register_video_device(MSM_VIDC_ENCODER_CMA,
+				nr + 3, core, dev);
+	if (rc) {
+		dprintk(VIDC_ERR, "Failed to register video cma encoder\n");
+		goto err_enc;
+	}
+
 	/* setup the cvp device */
 	if (core->resources.domain_cvp) {
 		rc = msm_vidc_register_video_device(MSM_VIDC_CVP,
@@ -785,7 +793,7 @@ static int msm_vidc_pm_suspend(struct device *dev)
 
 static int msm_vidc_pm_resume(struct device *dev)
 {
-	place_marker("vidc resumed");
+	update_marker("vidc resumed");
 	dprintk(VIDC_INFO, "%s\n", __func__);
 	return 0;
 }

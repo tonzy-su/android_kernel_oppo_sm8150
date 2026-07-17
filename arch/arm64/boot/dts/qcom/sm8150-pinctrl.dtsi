@@ -837,12 +837,12 @@
 		ss5_pwr_ctrl_pins: ss5_pwr_ctrl_pins {
 			ss5_pwr_ctrl_rst_on: ss5_pwr_ctrl_rst_on {
 				mux {
-					pins = "gpio11", "gpio39";
+					pins = "gpio11", "gpio39", "gpio40";
 					function = "gpio";
 				};
 
 				config {
-					pins = "gpio11", "gpio39";
+					pins = "gpio11", "gpio39", "gpio40";
 					drive-strength = <2>; /* 2 mA */
 					bias-pull-up;
 					output-high;
@@ -851,12 +851,12 @@
 
 			ss5_pwr_ctrl_rst_off: ss5_pwr_ctrl_off {
 				mux {
-					pins = "gpio11", "gpio39";
+					pins = "gpio11", "gpio39", "gpio40";
 					function = "gpio";
 				};
 
 				config {
-					pins = "gpio11", "gpio39";
+					pins = "gpio11", "gpio39", "gpio40";
 					drive-strength = <2>; /* 2 mA */
 					bias-pull-down;
 					output-low;
@@ -923,6 +923,75 @@
 					bias-disable;
 				};
 			};
+		};
+
+		qupv3_se4_4uart_pins: qupv3_se4_4uart_pins {
+			qupv3_se4_default_ctsrtsrx:
+				qupv3_se4_default_ctsrtsrx {
+				mux {
+					pins = "gpio51", "gpio52", "gpio54";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio51", "gpio52", "gpio54";
+					drive-strength = <2>;
+					bias-pull-down;
+				};
+			};
+
+			qupv3_se4_default_tx: qupv3_se4_default_tx {
+				mux {
+					pins = "gpio53";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio53";
+					drive-strength = <2>;
+					bias-pull-up;
+				};
+			};
+
+			qupv3_se4_ctsrx: qupv3_se4_ctsrx {
+				mux {
+					pins = "gpio51", "gpio54";
+					function = "qup4";
+				};
+
+				config {
+					pins = "gpio51", "gpio54";
+					drive-strength = <2>;
+					bias-disable;
+				};
+			};
+
+			qupv3_se4_rts: qupv3_se4_rts {
+				mux {
+					pins = "gpio52";
+					function = "qup4";
+				};
+
+				config {
+					pins = "gpio52";
+					drive-strength = <2>;
+					bias-pull-down;
+				};
+			};
+
+			qupv3_se4_tx: qupv3_se4_tx {
+				mux {
+					pins = "gpio53";
+					function = "qup4";
+				};
+
+				config {
+					pins = "gpio53";
+					drive-strength = <2>;
+					bias-pull-up;
+				};
+			};
+
 		};
 
 		qupv3_se4_2uart_pins: qupv3_se4_2uart_pins {
@@ -4536,7 +4605,7 @@
 			hs1_i2s_data0_sleep: hs1_i2s_data0_sleep {
 				mux {
 					pins = "gpio158";
-					function = "sleep";
+					function = "gpio";
 				};
 
 				config {

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, 2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, 2020-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -443,7 +443,7 @@ void mdss_dsi_dfps_config_8996(struct mdss_dsi_ctrl_pdata *ctrl)
 	wmb(); /* make sure phy timings are updated*/
 }
 
-static void mdss_dsi_ctrl_phy_reset(struct mdss_dsi_ctrl_pdata *ctrl)
+void mdss_dsi_ctrl_phy_reset(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	/* start phy sw reset */
 	MIPI_OUTP(ctrl->ctrl_base + 0x12c, 0x0001);
@@ -2660,11 +2660,12 @@ int mdss_dsi_post_clkon_cb(void *priv,
 		/* enable split link for cmn clk cfg1 */
 		mdss_dsi_split_link_clk_cfg(ctrl, 1);
 
-		/* Enable HS TX driver in DSI PHY if applicable */
-		if ((clk & MDSS_DSI_LINK_CLK) &&
-				(l_type == MDSS_DSI_LINK_HS_CLK))
-			mdss_dsi_phy_hstx_drv_ctrl(ctrl, true);
 	}
+
+	/* Enable HS TX driver in DSI PHY if applicable */
+	if ((clk & MDSS_DSI_LINK_CLK) &&
+			(l_type == MDSS_DSI_LINK_HS_CLK))
+		mdss_dsi_phy_hstx_drv_ctrl(ctrl, true);
 
 
 error:
@@ -2698,7 +2699,8 @@ int mdss_dsi_post_clkoff_cb(void *priv,
 			 * supplies which support turning off in low power
 			 * state
 			 */
-			if (ctrl->ctrl_state & CTRL_STATE_DSI_ACTIVE)
+			if ((ctrl->ctrl_state & CTRL_STATE_DSI_ACTIVE) &&
+				(i != DSI_CORE_PM))
 				if (!sdata->power_data[i].vreg_config
 						->lp_disable_allowed)
 					continue;
@@ -2721,6 +2723,16 @@ int mdss_dsi_post_clkoff_cb(void *priv,
 				ctrl->core_power = false;
 			}
 		}
+
+		/*
+		 * temp workaround until framework issues pertaining to LP2
+		 * power state transitions are fixed. For now, we internally
+		 * transition to LP2 state whenever core power is turned off
+		 * in LP1 state
+		 */
+		if (mdss_dsi_is_panel_on_lp(pdata))
+			mdss_dsi_panel_power_ctrl(pdata,
+				MDSS_PANEL_POWER_LP2);
 	}
 	return rc;
 }
@@ -2758,6 +2770,7 @@ int mdss_dsi_pre_clkon_cb(void *priv,
 		for (i = DSI_CORE_PM; i < DSI_MAX_PM; i++) {
 			if ((ctrl->ctrl_state & CTRL_STATE_DSI_ACTIVE) &&
 				(!pdata->panel_info.cont_splash_enabled) &&
+				(i != DSI_CORE_PM) &&
 				(!sdata->power_data[i].vreg_config
 						->lp_disable_allowed))
 				continue;
@@ -2778,6 +2791,14 @@ int mdss_dsi_pre_clkon_cb(void *priv,
 			}
 
 		}
+		/*
+		 * temp workaround until framework issues pertaining to LP2
+		 * power state transitions are fixed. For now, if we intend to
+		 * send a frame update when in LP1, we have to explicitly exit
+		 * LP2 state here
+		 */
+		if (mdss_dsi_is_panel_on_ulp(pdata))
+			mdss_dsi_panel_power_ctrl(pdata, MDSS_PANEL_POWER_LP1);
 	}
 
 	/* Disable dynamic clock gating*/

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -689,6 +689,8 @@ static const struct regmap_config gdsc_regmap_config = {
 	.fast_io    = true,
 };
 
+static struct lock_class_key gdsc_reg_lock_key;
+
 static int gdsc_probe(struct platform_device *pdev)
 {
 	static atomic_t gdsc_count = ATOMIC_INIT(-1);
@@ -863,6 +865,8 @@ static int gdsc_probe(struct platform_device *pdev)
 		sc->mbox = mbox_request_channel(&sc->mbox_client, 0);
 		if (IS_ERR(sc->mbox)) {
 			ret = PTR_ERR(sc->mbox);
+			if (ret == -EAGAIN)
+				ret = -EPROBE_DEFER;
 			if (ret != -EPROBE_DEFER)
 				dev_err(&pdev->dev, "mailbox channel request failed, ret=%d\n",
 					ret);
@@ -1019,6 +1023,9 @@ static int gdsc_probe(struct platform_device *pdev)
 		ret = PTR_ERR(sc->rdev);
 		goto err;
 	}
+
+	/* Create lockdep class to avoid false positive lock warnings */
+	lockdep_set_class(&sc->rdev->mutex, &gdsc_reg_lock_key);
 
 	return 0;
 

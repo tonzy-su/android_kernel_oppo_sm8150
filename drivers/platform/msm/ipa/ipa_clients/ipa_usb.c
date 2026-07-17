@@ -2111,6 +2111,17 @@ static int ipa3_usb_xdci_connect_internal(
 			return result;
 	}
 
+	/* Start MHIP UL channel before starting USB UL channel
+	 * DL channel will be started when voting for PCIe -> LPM Exit.
+	 */
+	if (ipa3_is_mhip_offload_enabled()) {
+		result = ipa_mpm_mhip_xdci_pipe_enable(params->teth_prot);
+		if (result) {
+			IPA_USB_ERR("failed to enable MHIP UL channel\n");
+			goto connect_fail;
+		}
+	}
+
 	if (params->teth_prot != IPA_USB_DIAG) {
 		/* Start UL channel */
 		result = ipa3_xdci_start(params->usb_to_ipa_clnt_hdl,
@@ -2131,20 +2142,11 @@ static int ipa3_usb_xdci_connect_internal(
 		goto connect_dl_fail;
 	}
 
-	/* MHIP pipe enablement */
-	if (ipa3_is_mhip_offload_enabled()) {
-		result = ipa_mpm_mhip_xdci_pipe_enable(params->teth_prot);
-		if (result) {
-			IPA_USB_ERR("failed to enable MHIP channel\n");
-			goto connect_teth_prot_fail;
-		}
-	}
-
 	/* Connect tethering protocol */
 	result = ipa3_usb_connect_teth_prot(params->teth_prot);
 	if (result) {
 		IPA_USB_ERR("failed to connect teth protocol\n");
-		goto connect_mhip_prot_fail;
+		goto connect_teth_prot_fail;
 	}
 
 	if (!ipa3_usb_set_state(IPA_USB_CONNECTED, false, ttype)) {
@@ -2158,9 +2160,6 @@ static int ipa3_usb_xdci_connect_internal(
 
 state_change_connected_fail:
 	ipa3_usb_disconnect_teth_prot(params->teth_prot);
-connect_mhip_prot_fail:
-	if (ipa3_is_mhip_offload_enabled())
-		ipa_mpm_mhip_xdci_pipe_disable(params->teth_prot);
 connect_teth_prot_fail:
 	ipa3_xdci_disconnect(params->ipa_to_usb_clnt_hdl, false, -1);
 	ipa3_reset_gsi_channel(params->ipa_to_usb_clnt_hdl);
@@ -2172,11 +2171,15 @@ connect_dl_fail:
 		ipa3_reset_gsi_event_ring(params->usb_to_ipa_clnt_hdl);
 	}
 connect_ul_fail:
+	if (ipa3_is_mhip_offload_enabled())
+		ipa_mpm_mhip_xdci_pipe_disable(params->teth_prot);
+connect_fail:
 	if (ipa_pm_is_used())
 		ipa_pm_deactivate_sync(
 			ipa3_usb_ctx->ttype_ctx[ttype].pm_ctx.hdl);
 	else
 		ipa3_usb_release_prod(ttype);
+
 	return result;
 }
 
@@ -3297,23 +3300,23 @@ int ipa3_get_usb_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 	}
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_USB_CHANNELS; i++) {
-		stats->ring[i].ringFull = ioread32(
+		stats->u.ring[i].ringFull = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGFULL_OFF);
-		stats->ring[i].ringEmpty = ioread32(
+		stats->u.ring[i].ringEmpty = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGEMPTY_OFF);
-		stats->ring[i].ringUsageHigh = ioread32(
+		stats->u.ring[i].ringUsageHigh = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGUSAGEHIGH_OFF);
-		stats->ring[i].ringUsageLow = ioread32(
+		stats->u.ring[i].ringUsageLow = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGUSAGELOW_OFF);
-		stats->ring[i].RingUtilCount = ioread32(
+		stats->u.ring[i].RingUtilCount = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGUTILCOUNT_OFF);

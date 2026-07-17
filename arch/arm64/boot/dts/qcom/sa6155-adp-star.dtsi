@@ -1,4 +1,4 @@
-/* Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -12,6 +12,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/clock/qcom,gcc-sm6150.h>
 #include "sa6155-cnss.dtsi"
+#include "sa6155-display.dtsi"
 
 &qupv3_2 {
 	status = "ok";
@@ -47,6 +48,14 @@
 		};
 	};
 
+	ss5_pwr_ctrl0 {
+		compatible = "gnss_sirf";
+		pinctrl-0 = <&ss5_pwr_ctrl_rst_on>;
+		ssVreset-gpio = <&tlmm 87 1>;
+		ssVonoff-gpio = <&tlmm 20 1>;
+		ssVboot-gpio = <&tlmm 21 1>;
+	};
+
 	hsi2s: qcom,hsi2s {
 		compatible = "qcom,sa6155-hsi2s", "qcom,hsi2s";
 		number-of-interfaces = <2>;
@@ -63,6 +72,9 @@
 			      "csr_hclk";
 		number-of-rate-detectors = <2>;
 		rate-detector-interfaces = <0 1>;
+		iommus = <&apps_smmu 0x035C 0x1>;
+		qcom,smmu-s1-bypass;
+		qcom,iova-mapping = <0x0 0xFFFFFFFF>;
 
 		sdr0: qcom,hs0_i2s {
 			compatible = "qcom,hsi2s-interface";
@@ -74,9 +86,6 @@
 				     &hs0_i2s_data1_sleep>;
 			clocks = <&clock_gcc GCC_SDR_PRI_MI2S_CLK>;
 			clock-names = "pri_mi2s_clk";
-			iommus = <&apps_smmu 0x035C 0x0>;
-			qcom,smmu-s1-bypass;
-			qcom,iova-mapping = <0x0 0xFFFFFFFF>;
 			bit-clock-hz = <12288000>;
 			data-buffer-ms = <10>;
 			bit-depth = <32>;
@@ -106,9 +115,6 @@
 				     &hs1_i2s_data1_sleep>;
 			clocks = <&clock_gcc GCC_SDR_SEC_MI2S_CLK>;
 			clock-names = "sec_mi2s_clk";
-			iommus = <&apps_smmu 0x035D 0x0>;
-			qcom,smmu-s1-bypass;
-			qcom,iova-mapping = <0x0 0xFFFFFFFF>;
 			bit-clock-hz = <12288000>;
 			data-buffer-ms = <10>;
 			bit-depth = <32>;
@@ -240,6 +246,9 @@
 	qcom,vddp-ref-clk-min-uV = <1232000>;
 	qcom,vddp-ref-clk-max-uV = <1260000>;
 
+	/* Disable Write Booster Feature */
+	qcom,disable-wb-support;
+
 	status = "ok";
 };
 
@@ -282,8 +291,14 @@
 };
 
 &usb0 {
+	interrupts = <0 489 0>, <0 486 0>, <0 488 0>;
+	interrupt-names = "dp_hs_phy_irq",
+			"ss_phy_irq", "dm_hs_phy_irq";
 	qcom,default-mode-none;
 	qcom,ignore-wakeup-src-in-hostmode;
+	dwc3@a600000 {
+		snps,dis_u3_susphy_quirk;
+	};
 };
 
 &qusb_phy0 {
@@ -311,6 +326,10 @@
 };
 
 &qupv3_se5_i2c {
+	status = "ok";
+};
+
+&qupv3_se4_2uart {
 	status = "ok";
 };
 

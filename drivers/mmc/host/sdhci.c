@@ -39,6 +39,10 @@
 
 #include "sdhci.h"
 #include "cmdq_hci.h"
+#if IS_ENABLED(CONFIG_MMC_QTI_NONCMDQ_ICE)
+#include "cmdq_hci-crypto.h"
+#include "cmdq_hci-crypto-qti.h"
+#endif
 
 #define DRIVER_NAME "sdhci"
 
@@ -189,7 +193,7 @@ static void sdhci_set_card_detection(struct sdhci_host *host, bool enable)
 	u32 present;
 
 	if ((host->quirks & SDHCI_QUIRK_BROKEN_CARD_DETECTION) ||
-	    !mmc_card_is_removable(host->mmc))
+	    !mmc_card_is_removable(host->mmc) || mmc_can_gpio_cd(host->mmc))
 		return;
 
 	if (enable) {
@@ -1177,7 +1181,7 @@ static void __sdhci_finish_mrq(struct sdhci_host *host, struct mmc_request *mrq)
 
 	WARN_ON(i >= SDHCI_MAX_MRQS);
 
-	tasklet_schedule(&host->finish_tasklet);
+	tasklet_hi_schedule(&host->finish_tasklet);
 }
 
 static void sdhci_finish_mrq(struct sdhci_host *host, struct mmc_request *mrq)
@@ -1918,6 +1922,13 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 				host->ops->config_auto_tuning_cmd(host, false,
 					sdhci_get_tuning_cmd(host));
 		}
+#if IS_ENABLED(CONFIG_MMC_QTI_NONCMDQ_ICE)
+		if (sdhci_crypto_cfg(host, mrq, 0)) {
+			pr_err("%s: crypto cfg failed\n",
+					mmc_hostname(host->mmc));
+			return;
+		}
+#endif
 
 		if (mrq->sbc && !(host->flags & SDHCI_AUTO_CMD23))
 			sdhci_send_command(host, mrq->sbc);
@@ -3295,6 +3306,14 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
 		} else {
 			pr_msg = true;
 		}
+
+		if (host->mmc->ops->get_cd &&
+				!host->mmc->ops->get_cd(host->mmc)) {
+			pr_msg = false;
+			pr_err("%s: Got data error(%d) during card removal\n",
+				mmc_hostname(host->mmc), host->data->error);
+		}
+
 		if (pr_msg && __ratelimit(&host->dbg_dump_rs)) {
 			pr_err("%s: data txfr (0x%08x) error: %d after %lld ms\n",
 			       mmc_hostname(host->mmc), intmask,
@@ -4873,6 +4892,10 @@ int __sdhci_add_host(struct sdhci_host *host)
 		else
 			host->cq_host->ops = &sdhci_cmdq_ops;
 	}
+
+#if IS_ENABLED(CONFIG_MMC_QTI_NONCMDQ_ICE)
+	crypto_qti_enable_noncmdq(host);
+#endif
 
 	pr_info("%s: SDHCI controller on %s [%s] using %s in %s mode\n",
 	mmc_hostname(mmc), host->hw_name, dev_name(mmc_dev(mmc)),

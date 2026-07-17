@@ -954,7 +954,6 @@ int dwc3_core_init(struct dwc3 *dwc)
 		 */
 		if (!dwc3_is_usb31(dwc)) {
 			reg |= DWC3_GUCTL1_PARKMODE_DISABLE_SS;
-			reg |= DWC3_GUCTL1_PARKMODE_DISABLE_HS;
 			reg |= DWC3_GUCTL1_PARKMODE_DISABLE_FSLS;
 		}
 
@@ -1008,6 +1007,19 @@ int dwc3_core_init(struct dwc3 *dwc)
 		reg = dwc3_readl(dwc->regs, DWC3_GUCTL1);
 		reg |= DWC3_GUCTL1_IP_GAP_ADD_ON(1);
 		dwc3_writel(dwc->regs, DWC3_GUCTL1, reg);
+	}
+
+	/* Force Gen1 speed on Gen2 controller if "force_gen1" is present */
+	if (dwc->force_gen1) {
+		reg = dwc3_readl(dwc->regs, DWC3_LLUCTL(0));
+		reg |= DWC3_FORCE_GEN1;
+		dwc3_writel(dwc->regs, DWC3_LLUCTL(0), reg);
+
+		if (dwc->dual_port) {
+			reg = dwc3_readl(dwc->regs, DWC3_LLUCTL(1));
+			reg |= DWC3_FORCE_GEN1;
+			dwc3_writel(dwc->regs, DWC3_LLUCTL(1), reg);
+		}
 	}
 
 	return 0;
@@ -1216,6 +1228,8 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 	device_property_read_u8(dev, "snps,hird-threshold",
 				&hird_threshold);
 
+	dwc->usb2_gadget_lpm_disable = device_property_read_bool(dev,
+				"snps,usb2-gadget-lpm-disable");
 	device_property_read_u32(dev, "snps,xhci-imod-value",
 			&dwc->xhci_imod_value);
 
@@ -1281,6 +1295,8 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 
 	dwc->dis_metastability_quirk = device_property_read_bool(dev,
 				"snps,dis_metastability_quirk");
+
+	dwc->force_gen1 = device_property_read_bool(dev, "snps,force-gen1");
 
 	dwc->lpm_nyet_threshold = lpm_nyet_threshold;
 	dwc->tx_de_emphasis = tx_de_emphasis;
@@ -1519,6 +1535,8 @@ static int dwc3_remove(struct platform_device *pdev)
 
 	ipc_log_context_destroy(dwc->dwc_ipc_log_ctxt);
 	dwc->dwc_ipc_log_ctxt = NULL;
+	ipc_log_context_destroy(dwc->dwc_dma_ipc_log_ctxt);
+	dwc->dwc_dma_ipc_log_ctxt = NULL;
 	count--;
 	dwc3_instance[dwc->index] = NULL;
 

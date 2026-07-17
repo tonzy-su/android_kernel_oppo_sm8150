@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -43,6 +43,8 @@
 
 #define AIS_VFE_MASK0_RDI 0x780001E0
 #define AIS_VFE_MASK1_RDI 0x000000BC
+
+#define AIS_VFE_MASK1_RDI_OVERFLOW_SHT 2
 
 #define AIS_VFE_STATUS0_BUS_WR_IRQ  (1 << 9)
 #define AIS_VFE_STATUS0_RDI_SOF_IRQ  (0xF << AIS_VFE_STATUS0_RDI_SOF_IRQ_SHFT)
@@ -245,8 +247,10 @@ static int ais_vfe_reset(void *hw_priv,
 	core_info->irq_mask0 = 0x0;
 	cam_io_w_mb(0x0, core_info->mem_base + AIS_VFE_IRQ_MASK0);
 
-	for (i = 0; i < AIS_IFE_PATH_MAX; i++)
+	for (i = 0; i < AIS_IFE_PATH_MAX; i++) {
 		ais_clear_rdi_path(&core_info->rdi_out[i]);
+		core_info->rdi_out[i].state = AIS_ISP_RESOURCE_STATE_AVAILABLE;
+	}
 
 	CAM_DBG(CAM_ISP, "Exit");
 	return rc;
@@ -651,13 +655,19 @@ int ais_vfe_stop(void *hw_priv, void *stop_args, uint32_t arg_size)
 	cam_io_w_mb((1 << stop_cmd->path), core_info->mem_base +
 			bus_hw_info->common_reg.sw_reset);
 
-	/* Wait for completion or timeout of 50ms */
+	/* Wait for completion or timeout of 100ms */
 	rc = wait_for_completion_timeout(&vfe_hw->hw_complete,
-					msecs_to_jiffies(50));
-	if (rc)
+					msecs_to_jiffies(100));
+	if (rc) {
+		if (rc < 50)
+			CAM_WARN(CAM_ISP,
+				"System getting overload. Bus WR reset left time %d ms",
+				rc);
+
 		rc = 0;
-	else
+	} else {
 		CAM_WARN(CAM_ISP, "Reset Bus WR timeout");
+	}
 
 	ais_clear_rdi_path(rdi_path);
 
@@ -1083,7 +1093,11 @@ static int ais_vfe_handle_sof(
 		if (p_rdi->state != AIS_ISP_RESOURCE_STATE_STREAMING)
 			continue;
 
+		AIS_ATRACE_BEGIN("SOF_%u_%u_%lu",
+			core_info->vfe_idx, path, p_rdi->frame_cnt);
 		ais_vfe_handle_sof_rdi(core_info, work_data, path);
+		AIS_ATRACE_END("SOF_%u_%u_%lu",
+			core_info->vfe_idx, path, p_rdi->frame_cnt);
 
 		//enq buffers
 		spin_lock_bh(&p_rdi->buffer_lock);
@@ -1344,8 +1358,12 @@ static int ais_vfe_bus_handle_frame_done(
 
 		if (client_mask & (0x1 << client)) {
 			//process frame done
+			AIS_ATRACE_BEGIN("FD_%u_%u_%lu",
+				core_info->vfe_idx, client, p_rdi->frame_cnt);
 			ais_vfe_bus_handle_client_frame_done(core_info,
 				client, work_data->last_addr[client]);
+			AIS_ATRACE_END("FD_%u_%u_%lu",
+				core_info->vfe_idx, client, p_rdi->frame_cnt);
 		}
 	}
 
@@ -1417,8 +1435,11 @@ static int ais_vfe_handle_bus_wr_irq(struct cam_hw_info *vfe_hw,
 		work_data->bus_wr_status[1],
 		work_data->bus_wr_status[2]);
 
-	if (work_data->bus_wr_status[1])
+	if (work_data->bus_wr_status[1]) {
+		AIS_ATRACE_BEGIN("FD_%d", core_info->vfe_idx);
 		ais_vfe_bus_handle_frame_done(core_info, work_data);
+		AIS_ATRACE_END("FD_%d", core_info->vfe_idx);
+	}
 
 	if (work_data->bus_wr_status[0] & 0x7800) {
 		CAM_ERR(CAM_ISP, "VFE%d: WR BUS error occurred status = 0x%x",
@@ -1467,7 +1488,9 @@ static int ais_vfe_process_irq_bh(void *priv, void *data)
 
 	switch (work_data->evt_type) {
 	case AIS_VFE_HW_IRQ_EVENT_SOF:
+		AIS_ATRACE_BEGIN("SOF_%d", core_info->vfe_idx);
 		rc = ais_vfe_handle_sof(core_info, work_data);
+		AIS_ATRACE_END("SOF_%d", core_info->vfe_idx);
 		break;
 	case AIS_VFE_HW_IRQ_EVENT_BUS_WR:
 		rc = ais_vfe_handle_bus_wr_irq(vfe_hw, core_info, work_data);
@@ -1521,6 +1544,7 @@ irqreturn_t ais_vfe_irq(int irq_num, void *data)
 	struct cam_hw_info            *vfe_hw;
 	struct ais_vfe_hw_core_info   *core_info;
 	uint32_t ife_status[2] = {};
+	int path =  0;
 
 	if (!data)
 		return IRQ_NONE;
@@ -1603,10 +1627,25 @@ irqreturn_t ais_vfe_irq(int irq_num, void *data)
 				AIS_VFE_STATUS1_RDI_OVERFLOW_IRQ_SHFT) &
 				AIS_VFE_STATUS1_RDI_OVERFLOW_IRQ_MSK;
 
+				for (path; path < AIS_IFE_PATH_MAX; path++) {
+
+					if (!(work_data.path & (1 << path)))
+						continue;
+
+					/* Disable rdi* overflow irq mask*/
+					core_info->irq_mask1 &= ~(1 <<
+					(AIS_VFE_MASK1_RDI_OVERFLOW_SHT +
+					path));
+					cam_io_w_mb(core_info->irq_mask1,
+						core_info->mem_base +
+						AIS_VFE_IRQ_MASK1);
+				}
+
 				CAM_ERR_RATE_LIMIT(CAM_ISP,
 					"IFE%d Overflow 0x%x",
 					core_info->vfe_idx,
 					work_data.path);
+
 				work_data.evt_type = AIS_VFE_HW_IRQ_EVENT_ERROR;
 				ais_vfe_dispatch_irq(vfe_hw, &work_data);
 			}

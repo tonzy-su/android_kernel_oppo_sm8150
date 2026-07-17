@@ -13,7 +13,7 @@ obj-$(CONFIG_UFSTW) += ufstw.o
 obj-$(CONFIG_UFSTW_DEBUGDRV) += ufstw-ddrv.o
 #endif
 obj-$(CONFIG_SCSI_UFSHCD) += ufshcd-core.o
-ufshcd-core-y := ufshcd.o
+ufshcd-core-y := ufshcd.o ufs-sysfs.o
 obj-$(CONFIG_SCSI_UFSHCD_PCI) += ufshcd-pci.o
 obj-$(CONFIG_SCSI_UFSHCD_PLATFORM) += ufshcd-pltfrm.o
 obj-$(CONFIG_SCSI_UFS_TEST) += ufs_test.o

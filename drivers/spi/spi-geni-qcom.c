@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -108,6 +108,16 @@
 				M_RX_FIFO_RD_ERR_EN | M_RX_FIFO_WR_ERR_EN | \
 				M_TX_FIFO_RD_ERR_EN | M_TX_FIFO_WR_ERR_EN)
 
+/* SPI sampling registers */
+#define SE_GENI_CGC_CTRL	(0x28)
+#define SE_GENI_CFG_SEQ_START	(0x84)
+#define SE_GENI_CFG_REG108	(0x2B0)
+#define SE_GENI_CFG_REG109	(0x2B4)
+#define CPOL_CTRL_SHFT	1
+#define RX_IO_POS_FF_EN_SEL_SHFT	4
+#define RX_IO_EN2CORE_EN_DELAY_SHFT	8
+#define RX_SI_EN2IO_DELAY_SHFT 12
+
 struct gsi_desc_cb {
 	struct spi_master *spi;
 	struct spi_transfer *xfer;
@@ -175,6 +185,9 @@ struct spi_geni_master {
 	bool dis_autosuspend;
 	bool cmd_done;
 	struct spi_geni_ssr spi_ssr;
+	bool set_miso_sampling;
+	u32 miso_sampling_ctrl_val;
+	bool use_fixed_timeout;
 };
 
 static void spi_slv_setup(struct spi_geni_master *mas);
@@ -243,6 +256,23 @@ static int spi_slv_abort(struct spi_master *spi)
 	return 0;
 }
 
+static inline void spi_geni_clk_conf(struct spi_geni_master *mas,
+		int clk_div, int clk_idx)
+{
+	u32 clk_sel = 0;
+	u32 m_clk_cfg = 0;
+
+	clk_sel |= (clk_idx & CLK_SEL_MSK);
+	m_clk_cfg |= ((clk_div << CLK_DIV_SHFT) | SER_CLK_EN);
+	geni_write_reg(clk_sel, mas->base, SE_GENI_CLK_SEL);
+	geni_write_reg(m_clk_cfg, mas->base, GENI_SER_M_CLK_CFG);
+
+	/*
+	 * Ensure Clk config completes before return.
+	 */
+	mb();
+}
+
 static int get_spi_clk_cfg(u32 speed_hz, struct spi_geni_master *mas,
 			int *clk_idx, int *clk_div)
 {
@@ -272,6 +302,8 @@ static int get_spi_clk_cfg(u32 speed_hz, struct spi_geni_master *mas,
 
 	dev_dbg(mas->dev, "%s: req %u resultant %lu sclk %lu, idx %d, div %d\n",
 		__func__, speed_hz, res_freq, sclk_freq, *clk_idx, *clk_div);
+
+	spi_geni_clk_conf(mas, *clk_div, *clk_idx);
 
 	ret = clk_set_rate(rsc->se_clk, sclk_freq);
 	if (ret)
@@ -324,8 +356,6 @@ static int setup_fifo_params(struct spi_device *spi_slv,
 	u32 cpha = geni_read_reg(mas->base, SE_SPI_CPHA);
 	u32 demux_sel = 0;
 	u32 demux_output_inv = 0;
-	u32 clk_sel = 0;
-	u32 m_clk_cfg = 0;
 	int ret = 0;
 	int idx;
 	int div;
@@ -383,23 +413,19 @@ static int setup_fifo_params(struct spi_device *spi_slv,
 		goto setup_fifo_params_exit;
 	}
 
-	clk_sel |= (idx & CLK_SEL_MSK);
-	m_clk_cfg |= ((div << CLK_DIV_SHFT) | SER_CLK_EN);
 	spi_setup_word_len(mas, spi_slv->mode, spi_slv->bits_per_word);
 	geni_write_reg(loopback_cfg, mas->base, SE_SPI_LOOPBACK);
 	geni_write_reg(demux_sel, mas->base, SE_SPI_DEMUX_SEL);
 	geni_write_reg(cpha, mas->base, SE_SPI_CPHA);
 	geni_write_reg(cpol, mas->base, SE_SPI_CPOL);
 	geni_write_reg(demux_output_inv, mas->base, SE_SPI_DEMUX_OUTPUT_INV);
-	geni_write_reg(clk_sel, mas->base, SE_GENI_CLK_SEL);
-	geni_write_reg(m_clk_cfg, mas->base, GENI_SER_M_CLK_CFG);
 	geni_write_reg(spi_delay_params, mas->base, SE_SPI_DELAY_COUNTERS);
 	GENI_SE_DBG(mas->ipc, false, mas->dev,
-		"%s:Loopback%d demux_sel0x%x demux_op_inv 0x%x clk_cfg 0x%x\n",
-		__func__, loopback_cfg, demux_sel, demux_output_inv, m_clk_cfg);
+		"%s:Loopback%d demux_sel0x%x demux_op_inv 0x%x\n",
+		__func__, loopback_cfg, demux_sel, demux_output_inv);
 	GENI_SE_DBG(mas->ipc, false, mas->dev,
-		"%s:clk_sel 0x%x cpol %d cpha %d delay 0x%x\n", __func__,
-					clk_sel, cpol, cpha, spi_delay_params);
+		"%s:cpol %d cpha %d delay 0x%x\n", __func__,
+					 cpol, cpha, spi_delay_params);
 	/* Ensure message level attributes are written before returning */
 	mb();
 setup_fifo_params_exit:
@@ -660,7 +686,7 @@ static int setup_gsi_xfer(struct spi_transfer *xfer,
 		if (IS_ERR_OR_NULL(c0_tre)) {
 			dev_err(mas->dev, "%s:Err setting c0tre:%d\n",
 							__func__, ret);
-			return PTR_ERR(c0_tre);
+			return PTR_ERR(c0_tre) ?: -EINVAL;
 		}
 	}
 
@@ -709,7 +735,7 @@ static int setup_gsi_xfer(struct spi_transfer *xfer,
 		rx_tre = setup_dma_tre(rx_tre, xfer->rx_dma, xfer->len, mas, 0);
 		if (IS_ERR_OR_NULL(rx_tre)) {
 			dev_err(mas->dev, "Err setting up rx tre\n");
-			return PTR_ERR(rx_tre);
+			return PTR_ERR(rx_tre) ?: -EINVAL;
 		}
 		sg_set_buf(xfer_rx_sg, rx_tre, sizeof(*rx_tre));
 		mas->gsi[mas->num_xfers].rx_desc =
@@ -734,7 +760,7 @@ static int setup_gsi_xfer(struct spi_transfer *xfer,
 		tx_tre = setup_dma_tre(tx_tre, xfer->tx_dma, xfer->len, mas, 1);
 		if (IS_ERR_OR_NULL(tx_tre)) {
 			dev_err(mas->dev, "Err setting up tx tre\n");
-			return PTR_ERR(tx_tre);
+			return PTR_ERR(tx_tre) ?: -EINVAL;
 		}
 		sg_set_buf(xfer_tx_sg++, tx_tre, sizeof(*tx_tre));
 		mas->num_tx_eot++;
@@ -862,6 +888,7 @@ static int spi_geni_prepare_transfer_hardware(struct spi_master *spi)
 	int ret = 0, count = 0, proto;
 	u32 max_speed = spi->cur_msg->spi->max_speed_hz;
 	struct se_geni_rsc *rsc = &mas->spi_rsc;
+	u32 cpol, cpha, cfg_reg108, cfg_reg109, cfg_seq_start;
 
 	mutex_lock(&mas->spi_ssr.ssr_lock);
 	if (mas->spi_ssr.is_ssr_down) {
@@ -1020,6 +1047,54 @@ setup_ipc:
 				"%s:Major:%d Minor:%d step:%dos%d\n",
 			__func__, major, minor, step, mas->oversampling);
 		}
+
+		if (!mas->set_miso_sampling)
+			goto shared_se;
+
+		cpol = geni_read_reg(mas->base, SE_SPI_CPOL);
+		cpha = geni_read_reg(mas->base, SE_SPI_CPHA);
+		cfg_reg108 = geni_read_reg(mas->base, SE_GENI_CFG_REG108);
+		cfg_reg109 = geni_read_reg(mas->base, SE_GENI_CFG_REG109);
+		/* clear CPOL bit */
+		cfg_reg108 &= ~(1 << CPOL_CTRL_SHFT);
+
+		if (major == 1 && minor == 0) {
+			/* Write 1 to RX_SI_EN2IO_DELAY reg */
+			cfg_reg108 &= ~(0x7 << RX_SI_EN2IO_DELAY_SHFT);
+			cfg_reg108 |= (1 << RX_SI_EN2IO_DELAY_SHFT);
+			/* Write 0 to RX_IO_POS_FF_EN_SEL reg */
+			cfg_reg108 &= ~(1 << RX_IO_POS_FF_EN_SEL_SHFT);
+		} else if ((major < 2) || (major == 2 && minor < 5)) {
+			/* Write 0 to RX_IO_EN2CORE_EN_DELAY reg */
+			cfg_reg108 &= ~(0x7 << RX_IO_EN2CORE_EN_DELAY_SHFT);
+		} else {
+			/*
+			 * Write miso_sampling_ctrl_set to
+			 * RX_IO_EN2CORE_EN_DELAY reg
+			 */
+			cfg_reg108 &= ~(0x7 << RX_IO_EN2CORE_EN_DELAY_SHFT);
+			cfg_reg108 |= (mas->miso_sampling_ctrl_val <<
+					RX_IO_EN2CORE_EN_DELAY_SHFT);
+		}
+
+		geni_write_reg(cfg_reg108, mas->base, SE_GENI_CFG_REG108);
+
+		if (cpol == 0 && cpha == 0)
+			cfg_reg109 = 1;
+		else if (cpol == 1 && cpha == 0)
+			cfg_reg109 = 0;
+		geni_write_reg(cfg_reg109, mas->base,
+					SE_GENI_CFG_REG109);
+		if (!(major == 1 && minor == 0))
+			geni_write_reg(1, mas->base, SE_GENI_CFG_SEQ_START);
+		cfg_reg108 = geni_read_reg(mas->base, SE_GENI_CFG_REG108);
+		cfg_reg109 = geni_read_reg(mas->base, SE_GENI_CFG_REG109);
+		cfg_seq_start = geni_read_reg(mas->base, SE_GENI_CFG_SEQ_START);
+
+		GENI_SE_DBG(mas->ipc, false, mas->dev,
+			"%s cfg108: 0x%x cfg109: 0x%x cfg_seq_start: 0x%x\n",
+			__func__, cfg_reg108, cfg_reg109, cfg_seq_start);
+shared_se:
 		if (mas->dis_autosuspend)
 			GENI_SE_DBG(mas->ipc, false, mas->dev,
 					"Auto Suspend is disabled\n");
@@ -1087,8 +1162,6 @@ static int setup_fifo_xfer(struct spi_transfer *xfer,
 
 	/* Speed and bits per word can be overridden per transfer */
 	if (xfer->speed_hz != mas->cur_speed_hz) {
-		u32 clk_sel = 0;
-		u32 m_clk_cfg = 0;
 		int idx = 0;
 		int div = 0;
 
@@ -1099,10 +1172,6 @@ static int setup_fifo_xfer(struct spi_transfer *xfer,
 			return ret;
 		}
 		mas->cur_speed_hz = xfer->speed_hz;
-		clk_sel |= (idx & CLK_SEL_MSK);
-		m_clk_cfg |= ((div << CLK_DIV_SHFT) | SER_CLK_EN);
-		geni_write_reg(clk_sel, mas->base, SE_GENI_CLK_SEL);
-		geni_write_reg(m_clk_cfg, mas->base, GENI_SER_M_CLK_CFG);
 	}
 
 	mas->tx_rem_bytes = 0;
@@ -1150,6 +1219,9 @@ static int setup_fifo_xfer(struct spi_transfer *xfer,
 	 */
 	if (mas->disable_dma_mode) {
 		mas->cur_xfer_mode = FIFO_MODE;
+		geni_se_select_mode(mas->base, mas->cur_xfer_mode);
+	} else if (spi->slave) {
+		mas->cur_xfer_mode = SE_DMA;
 		geni_se_select_mode(mas->base, mas->cur_xfer_mode);
 	} else {
 		fifo_size = (mas->tx_fifo_depth *
@@ -1278,7 +1350,7 @@ static int spi_geni_transfer_one(struct spi_master *spi,
 {
 	int ret = 0;
 	struct spi_geni_master *mas = spi_master_get_devdata(spi);
-	unsigned long timeout;
+	unsigned long timeout, xfer_timeout;
 
 	if ((xfer->tx_buf == NULL) && (xfer->rx_buf == NULL)) {
 		dev_err(mas->dev, "Invalid xfer both tx rx are NULL\n");
@@ -1290,6 +1362,15 @@ static int spi_geni_transfer_one(struct spi_master *spi,
 		dev_err(mas->dev, "Zero length transfer\n");
 		return -EINVAL;
 	}
+
+	if (mas->use_fixed_timeout)
+		xfer_timeout = msecs_to_jiffies(SPI_XFER_TIMEOUT_MS);
+	else
+		xfer_timeout =
+			100 * msecs_to_jiffies(DIV_ROUND_UP(xfer->len * 8,
+				DIV_ROUND_UP(xfer->speed_hz, MSEC_PER_SEC)));
+	GENI_SE_DBG(mas->ipc, false, mas->dev,
+			"current xfer_timeout:%lu ms.\n", xfer_timeout);
 
 	mutex_lock(&mas->spi_ssr.ssr_lock);
 	if (mas->spi_ssr.is_ssr_down || !mas->spi_ssr.xfer_prepared) {
@@ -1311,7 +1392,7 @@ static int spi_geni_transfer_one(struct spi_master *spi,
 			spi->slave_state = true;
 		mutex_unlock(&mas->spi_ssr.ssr_lock);
 		timeout = wait_for_completion_timeout(&mas->xfer_done,
-					msecs_to_jiffies(SPI_XFER_TIMEOUT_MS));
+				xfer_timeout);
 		mutex_lock(&mas->spi_ssr.ssr_lock);
 		if (mas->spi_ssr.is_ssr_down)
 			goto err_ssr_transfer_one;
@@ -1358,10 +1439,8 @@ static int spi_geni_transfer_one(struct spi_master *spi,
 			int i;
 
 			for (i = 0 ; i < mas->num_tx_eot; i++) {
-				timeout =
-				wait_for_completion_timeout(
-					&mas->tx_cb,
-					msecs_to_jiffies(SPI_XFER_TIMEOUT_MS));
+				timeout = wait_for_completion_timeout(
+					&mas->tx_cb, xfer_timeout);
 				if (timeout <= 0) {
 					GENI_SE_ERR(mas->ipc, true, mas->dev,
 					"Tx[%d] timeout%lu\n", i, timeout);
@@ -1370,10 +1449,8 @@ static int spi_geni_transfer_one(struct spi_master *spi,
 				}
 			}
 			for (i = 0 ; i < mas->num_rx_eot; i++) {
-				timeout =
-				wait_for_completion_timeout(
-					&mas->rx_cb,
-					msecs_to_jiffies(SPI_XFER_TIMEOUT_MS));
+				timeout = wait_for_completion_timeout(
+					&mas->rx_cb, xfer_timeout);
 				if (timeout <= 0) {
 					GENI_SE_ERR(mas->ipc, true, mas->dev,
 					 "Rx[%d] timeout%lu\n", i, timeout);
@@ -1633,14 +1710,14 @@ static int spi_geni_probe(struct platform_device *pdev)
 	wrapper_ph_node = of_parse_phandle(pdev->dev.of_node,
 					"qcom,wrapper-core", 0);
 	if (IS_ERR_OR_NULL(wrapper_ph_node)) {
-		ret = PTR_ERR(wrapper_ph_node);
+		ret = PTR_ERR(wrapper_ph_node) ?: -ENODEV;
 		dev_err(&pdev->dev, "No wrapper core defined\n");
 		goto spi_geni_probe_err;
 	}
 	wrapper_pdev = of_find_device_by_node(wrapper_ph_node);
 	of_node_put(wrapper_ph_node);
 	if (IS_ERR_OR_NULL(wrapper_pdev)) {
-		ret = PTR_ERR(wrapper_pdev);
+		ret = PTR_ERR(wrapper_pdev) ?: -ENODEV;
 		dev_err(&pdev->dev, "Cannot retrieve wrapper device\n");
 		goto spi_geni_probe_err;
 	}
@@ -1657,7 +1734,7 @@ static int spi_geni_probe(struct platform_device *pdev)
 	rsc->geni_pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (IS_ERR_OR_NULL(rsc->geni_pinctrl)) {
 		dev_err(&pdev->dev, "No pinctrl config specified!\n");
-		ret = PTR_ERR(rsc->geni_pinctrl);
+		ret = PTR_ERR(rsc->geni_pinctrl) ?: -EINVAL;
 		goto spi_geni_probe_err;
 	}
 
@@ -1665,7 +1742,7 @@ static int spi_geni_probe(struct platform_device *pdev)
 							PINCTRL_DEFAULT);
 	if (IS_ERR_OR_NULL(rsc->geni_gpio_active)) {
 		dev_err(&pdev->dev, "No default config specified!\n");
-		ret = PTR_ERR(rsc->geni_gpio_active);
+		ret = PTR_ERR(rsc->geni_gpio_active) ?: -EINVAL;
 		goto spi_geni_probe_err;
 	}
 
@@ -1673,7 +1750,7 @@ static int spi_geni_probe(struct platform_device *pdev)
 							PINCTRL_SLEEP);
 	if (IS_ERR_OR_NULL(rsc->geni_gpio_sleep)) {
 		dev_err(&pdev->dev, "No sleep config specified!\n");
-		ret = PTR_ERR(rsc->geni_gpio_sleep);
+		ret = PTR_ERR(rsc->geni_gpio_sleep) ?: -EINVAL;
 		goto spi_geni_probe_err;
 	}
 
@@ -1691,21 +1768,21 @@ static int spi_geni_probe(struct platform_device *pdev)
 
 	rsc->se_clk = devm_clk_get(&pdev->dev, "se-clk");
 	if (IS_ERR(rsc->se_clk)) {
-		ret = PTR_ERR(rsc->se_clk);
+		ret = PTR_ERR(rsc->se_clk) ?: -ENODEV;
 		dev_err(&pdev->dev, "Err getting SE Core clk %d\n", ret);
 		goto spi_geni_probe_err;
 	}
 
 	rsc->m_ahb_clk = devm_clk_get(&pdev->dev, "m-ahb");
 	if (IS_ERR(rsc->m_ahb_clk)) {
-		ret = PTR_ERR(rsc->m_ahb_clk);
+		ret = PTR_ERR(rsc->m_ahb_clk) ?: -ENODEV;
 		dev_err(&pdev->dev, "Err getting M AHB clk %d\n", ret);
 		goto spi_geni_probe_err;
 	}
 
 	rsc->s_ahb_clk = devm_clk_get(&pdev->dev, "s-ahb");
 	if (IS_ERR(rsc->s_ahb_clk)) {
-		ret = PTR_ERR(rsc->s_ahb_clk);
+		ret = PTR_ERR(rsc->s_ahb_clk) ?: -ENODEV;
 		dev_err(&pdev->dev, "Err getting S AHB clk %d\n", ret);
 		goto spi_geni_probe_err;
 	}
@@ -1739,6 +1816,18 @@ static int spi_geni_probe(struct platform_device *pdev)
 	geni_mas->dis_autosuspend =
 		of_property_read_bool(pdev->dev.of_node,
 				"qcom,disable-autosuspend");
+	geni_mas->use_fixed_timeout =
+		of_property_read_bool(pdev->dev.of_node,
+				"qcom,use-fixed-timeout");
+	geni_mas->set_miso_sampling = of_property_read_bool(pdev->dev.of_node,
+				"qcom,set-miso-sampling");
+	if (geni_mas->set_miso_sampling) {
+		if (!of_property_read_u32(pdev->dev.of_node,
+				"qcom,miso-sampling-ctrl-val",
+				&geni_mas->miso_sampling_ctrl_val))
+			dev_info(&pdev->dev, "MISO_SAMPLING_SET: %d\n",
+				geni_mas->miso_sampling_ctrl_val);
+	}
 	geni_mas->phys_addr = res->start;
 	geni_mas->size = resource_size(res);
 	geni_mas->base = devm_ioremap(&pdev->dev, res->start,

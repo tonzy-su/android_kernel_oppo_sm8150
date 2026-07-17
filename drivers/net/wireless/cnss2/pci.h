@@ -65,6 +65,7 @@ struct cnss_pci_data {
 	struct cnss_wlan_driver *driver_ops;
 	bool pci_link_state;
 	bool pci_link_down_ind;
+	u32 pci_link_down_count;
 	struct pci_saved_state *saved_state;
 	struct pci_saved_state *default_state;
 	struct msm_pcie_register_event msm_pci_event;
@@ -76,6 +77,7 @@ struct cnss_pci_data {
 	dma_addr_t smmu_iova_start;
 	size_t smmu_iova_len;
 	dma_addr_t smmu_iova_ipa_start;
+	dma_addr_t smmu_iova_ipa_current;
 	size_t smmu_iova_ipa_len;
 	void __iomem *bar;
 	struct cnss_msi_config *msi_config;
@@ -136,6 +138,7 @@ static inline int cnss_pci_get_auto_suspended(void *bus_priv)
 
 int cnss_suspend_pci_link(struct cnss_pci_data *pci_priv);
 int cnss_resume_pci_link(struct cnss_pci_data *pci_priv);
+int cnss_pci_recover_link_down(struct cnss_pci_data *pci_priv);
 int cnss_pci_init(struct cnss_plat_data *plat_priv);
 void cnss_pci_deinit(struct cnss_plat_data *plat_priv);
 int cnss_pci_alloc_fw_mem(struct cnss_pci_data *pci_priv);
@@ -170,5 +173,9 @@ void cnss_pci_pm_runtime_put_noidle(struct cnss_pci_data *pci_priv);
 void cnss_pci_pm_runtime_mark_last_busy(struct cnss_pci_data *pci_priv);
 int cnss_pci_update_status(struct cnss_pci_data *pci_priv,
 			   enum cnss_driver_status status);
+int cnss_pci_get_iova(struct cnss_pci_data *pci_priv, u64 *addr, u64 *size);
+int cnss_pci_get_iova_ipa(struct cnss_pci_data *pci_priv, u64 *addr,
+			  u64 *size);
+bool cnss_pci_is_smmu_s1_enabled(struct cnss_pci_data *pci_priv);
 
 #endif /* _CNSS_PCI_H */

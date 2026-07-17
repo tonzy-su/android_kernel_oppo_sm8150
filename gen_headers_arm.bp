@@ -474,6 +474,8 @@ gen_headers_out_arm = [
     "linux/qcota.h",
     "linux/qg-profile.h",
     "linux/qg.h",
+    "linux/qbg-profile.h",
+    "linux/qbg.h",
     "linux/qnx4_fs.h",
     "linux/qnxtypes.h",
     "linux/qrng.h",
@@ -525,6 +527,7 @@ gen_headers_out_arm = [
     "linux/shm.h",
     "linux/signal.h",
     "linux/signalfd.h",
+    "linux/slatecom_interface.h",
     "linux/smc.h",
     "linux/smc_diag.h",
     "linux/smcinvoke.h",
@@ -636,6 +639,7 @@ gen_headers_out_arm = [
     "linux/zorro_ids.h",
     "media/ais_isp.h",
     "media/ais_sensor.h",
+    "media/ais_v4l2loopback.h",
     "media/cam_cpas.h",
     "media/cam_defs.h",
     "media/cam_fd.h",
@@ -952,6 +956,7 @@ gen_headers_out_arm = [
     "linux/netfilter/ipset/ip_set_hash.h",
     "linux/netfilter/ipset/ip_set_list.h",
     "linux/msm_eth.h",
+    "linux/eth_adapt_power.h",
 
     // From arch/arm/include/uapi/**/*.h
 

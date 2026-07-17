@@ -2,7 +2,8 @@
  * drivers/mmc/host/sdhci-msm.c - Qualcomm Technologies, Inc. MSM SDHCI Platform
  * driver source file
  *
- * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -267,6 +268,40 @@ struct sdhci_msm_offset sdhci_msm_offset_mci_present = {
 	.CORE_DDR_CONFIG_OLD = 0x1B8, /* Applicable to sdcc minor ver < 0x49 */
 	.CORE_DDR_CONFIG = 0x1BC,
 };
+
+u32 sdhci_msm_major_version(struct cmdq_host *host)
+{
+	void __iomem *base_addr;
+	u32 version = 0xffffffff;
+	u32 major = 0xffffffff;
+	u32 offset = SDCC_REG_IP_CATALOG;
+	struct sdhci_host *sdhci = NULL;
+	struct sdhci_pltfm_host *pltfm_host = NULL;
+	struct sdhci_msm_host *msm_host = NULL;
+
+	if (!host) {
+		pr_err("cmdq_host cannot be NULL");
+		goto exit;
+	}
+
+	sdhci = mmc_priv(host->mmc);
+	pltfm_host = sdhci_priv(sdhci);
+	msm_host = pltfm_host->priv;
+
+	if (msm_host->mci_removed)
+		base_addr = sdhci->ioaddr;
+	else
+		base_addr = msm_host->core_mem;
+
+	version = readl_relaxed(base_addr + offset);
+
+	major = (version & SDHCI_CTRLLR_MAJOR_VER_MASK)
+		>> SDHCI_CTRLLR_MAJOR_VER_SHIFT;
+
+exit:
+	return major;
+}
+EXPORT_SYMBOL(sdhci_msm_major_version);
 
 u8 sdhci_msm_readb_relaxed(struct sdhci_host *host, u32 offset)
 {
@@ -1202,7 +1237,7 @@ static void sdhci_msm_set_mmc_drv_type(struct sdhci_host *host, u32 opcode,
 int sdhci_msm_execute_tuning(struct sdhci_host *host, u32 opcode)
 {
 	unsigned long flags;
-	int tuning_seq_cnt = 3;
+	int tuning_seq_cnt = 10;
 	u8 phase, *data_buf, tuned_phases[NUM_TUNING_PHASES], tuned_phase_cnt;
 	const u32 *tuning_block_pattern = tuning_block_64;
 	int size = sizeof(tuning_block_64); /* Tuning pattern size in bytes */
@@ -1398,6 +1433,22 @@ retry:
 		sdhci_msm_set_mmc_drv_type(host, opcode, 0);
 
 	if (tuned_phase_cnt) {
+		if (tuned_phase_cnt == ARRAY_SIZE(tuned_phases)) {
+			/*
+			 * All phases valid is _almost_ as bad as no phases
+			 * valid.  Probably all phases are not really reliable
+			 * but we didn't detect where the unreliable place is.
+			 * That means we'll essentially be guessing and hoping
+			 * we get a good phase.  Better to try a few times.
+			 */
+			dev_dbg(mmc_dev(mmc), "%s: All phases valid; try again\n",
+				mmc_hostname(mmc));
+			if (--tuning_seq_cnt) {
+				tuned_phase_cnt = 0;
+				goto retry;
+			}
+		}
+
 		rc = msm_find_most_appropriate_phase(host, tuned_phases,
 							tuned_phase_cnt);
 		if (rc < 0)
@@ -2468,7 +2519,7 @@ static int sdhci_msm_vreg_enable(struct sdhci_msm_reg_data *vreg)
 
 	if (!vreg->is_enabled) {
 		/* Set voltage level */
-		ret = sdhci_msm_vreg_set_voltage(vreg, vreg->high_vol_level,
+		ret = sdhci_msm_vreg_set_voltage(vreg, vreg->low_vol_level,
 						vreg->high_vol_level);
 		if (ret)
 			return ret;
@@ -3799,14 +3850,14 @@ void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 			msm_host_offset->CORE_DLL_STATUS),
 		readl_relaxed(host->ioaddr +
 			msm_host_offset->CORE_DLL_CONFIG),
-		sdhci_msm_readl_relaxed(host,
+		readl_relaxed(host->ioaddr +
 			msm_host_offset->CORE_DLL_CONFIG_2));
 	pr_info("DLL cfg3: 0x%08x | DLL usr ctl:  0x%08x | DDR cfg: 0x%08x\n",
 		readl_relaxed(host->ioaddr +
 			msm_host_offset->CORE_DLL_CONFIG_3),
 		readl_relaxed(host->ioaddr +
 			msm_host_offset->CORE_DLL_USR_CTL),
-		sdhci_msm_readl_relaxed(host,
+		readl_relaxed(host->ioaddr +
 			msm_host_offset->CORE_DDR_CONFIG));
 	pr_info("SDCC ver: 0x%08x | Vndr adma err : addr0: 0x%08x addr1: 0x%08x\n",
 		readl_relaxed(host->ioaddr +
@@ -4534,6 +4585,13 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 	caps = readl_relaxed(host->ioaddr + SDHCI_CAPABILITIES);
 
 	/*
+	 * Support for some capabilities is not advertised by newer
+	 * controller versions and must be explicitly enabled.
+	 */
+	if (major >= 1 && minor != 0x11 && minor != 0x12)
+		caps |= SDHCI_CAN_VDD_300 | SDHCI_CAN_DO_8BIT;
+
+	/*
 	 * Starting with SDCC 5 controller (core major version = 1)
 	 * controller won't advertise 3.0v, 1.8v and 8-bit features
 	 * except for some targets.
@@ -4590,7 +4648,7 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 	 * starts coming.
 	 */
 	if ((major == 1) && ((minor == 0x42) || (minor == 0x46) ||
-				(minor == 0x49) || (minor >= 0x6b)))
+			(minor == 0x49) || (minor == 0x4D) || (minor >= 0x6b)))
 		msm_host->use_14lpp_dll = true;
 
 	/* Fake 3.0V support for SDIO devices which requires such voltage */

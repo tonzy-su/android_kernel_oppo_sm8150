@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -46,6 +46,10 @@
 		interrupts = <GIC_SPI 267 0>;
 		number-of-rate-detectors = <2>;
 		rate-detector-interfaces = <0 1>;
+		iommus = <&apps_smmu 0x1B5C 0x1>,
+			 <&apps_smmu 0x1B5E 0x0>;
+		qcom,smmu-s1-bypass;
+		qcom,iova-mapping = <0x0 0xFFFFFFFF>;
 
 		sdr0: qcom,hs0_i2s {
 			compatible = "qcom,hsi2s-interface";
@@ -57,9 +61,6 @@
 			pinctrl-1 = <&hs1_i2s_mclk_sleep &hs1_i2s_sck_sleep
 				     &hs1_i2s_ws_sleep &hs1_i2s_data0_sleep
 				     &hs1_i2s_data1_sleep>;
-			iommus = <&apps_smmu 0x1B5C 0x0>;
-			qcom,smmu-s1-bypass;
-			qcom,iova-mapping = <0x0 0xFFFFFFFF>;
 			bit-clock-hz = <12288000>;
 			data-buffer-ms = <10>;
 			bit-depth = <32>;
@@ -89,9 +90,6 @@
 			pinctrl-1 = <&hs2_i2s_mclk_sleep &hs2_i2s_sck_sleep
 				     &hs2_i2s_ws_sleep &hs2_i2s_data0_sleep
 				     &hs2_i2s_data1_sleep>;
-			iommus = <&apps_smmu 0x1B5D 0x0>;
-			qcom,smmu-s1-bypass;
-			qcom,iova-mapping = <0x0 0xFFFFFFFF>;
 			bit-clock-hz = <12288000>;
 			data-buffer-ms = <10>;
 			bit-depth = <32>;
@@ -121,9 +119,6 @@
 			pinctrl-1 = <&hs3_i2s_mclk_sleep &hs3_i2s_sck_sleep
 				     &hs3_i2s_ws_sleep &hs3_i2s_data0_sleep
 				     &hs3_i2s_data1_sleep>;
-			iommus = <&apps_smmu 0x1B5E 0x0>;
-			qcom,smmu-s1-bypass;
-			qcom,iova-mapping = <0x0 0xFFFFFFFF>;
 			bit-clock-hz = <12288000>;
 			data-buffer-ms = <10>;
 			bit-depth = <32>;
@@ -297,6 +292,11 @@
 &usb2 {
 	qcom,ignore-wakeup-src-in-hostmode;
 	status = "ok";
+	dwc3@a400000 {
+		reg = <0x0a400000 0xd941>;
+		snps,force-gen1;
+		maximum-speed = "super-speed";
+	};
 };
 
 &slpi_tlmm {
@@ -335,13 +335,21 @@
 	vdd-hba-supply = <&ufs_phy_gdsc>;
 	vdd-hba-fixed-regulator;
 	vcc-supply = <&pm8195_3_l10>;
-	vcc-voltage-level = <2894000 2904000>;
+	vcc-voltage-level = <2504000 2904000>;
 	vcc-low-voltage-sup;
 	vccq-supply = <&pm8195_1_l11>;
 	vccq2-supply = <&pm8195_3_l7>;
 	vcc-max-microamp = <750000>;
 	vccq-max-microamp = <750000>;
 	vccq2-max-microamp = <750000>;
+
+	qcom,vddp-ref-clk-supply = <&pm8195_2_l5>;
+	qcom,vddp-ref-clk-max-microamp = <100>;
+	qcom,vccq-parent-supply = <&pm8195_1_s2>;
+	qcom,vccq-parent-max-microamp = <210000>;
+
+	/* Disable Write Booster Feature for 1st UFS */
+	qcom,disable-wb-support;
 
 	status= "ok";
 };
@@ -353,7 +361,7 @@
 	vdda-phy-max-microamp = <138000>;
 	vdda-pll-max-microamp = <65100>;
 
-	status = "disabled";
+	status = "ok";
 };
 
 &ufshc2_mem {
@@ -368,19 +376,37 @@
 	vccq-max-microamp = <750000>;
 	vccq2-max-microamp = <750000>;
 
-	status= "disabled";
+	qcom,vddp-ref-clk-supply = <&pm8195_2_l5>;
+	qcom,vddp-ref-clk-max-microamp = <100>;
+	qcom,vccq-parent-supply = <&pm8195_1_s2>;
+	qcom,vccq-parent-max-microamp = <210000>;
+
+	/* Disable Write Booster Feature 2nd UFS */
+	qcom,disable-wb-support;
+
+	status= "ok";
 };
 
 &usb2_phy0 {
 	vdd-supply = <&pm8195_3_l5>;
 	vdda18-supply = <&pm8195_1_l12>;
 	vdda33-supply = <&pm8195_3_l16>;
+	qcom,param-override-seq =
+		<0x43 0x70
+		 0x01 0xb0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&usb2phy_ac_en1_default>;
 };
 
 &usb2_phy1 {
 	vdd-supply = <&pm8195_3_l5>;
 	vdda18-supply = <&pm8195_1_l12>;
 	vdda33-supply = <&pm8195_3_l16>;
+	qcom,param-override-seq =
+		<0x43 0x70
+		 0x01 0xb0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&usb2phy_ac_en2_default>;
 	status = "ok";
 };
 
@@ -388,6 +414,11 @@
 	vdd-supply = <&pm8195_3_l5>;
 	vdda18-supply = <&pm8195_1_l12>;
 	vdda33-supply = <&pm8195_3_l16>;
+	qcom,param-override-seq =
+		<0x43 0x70
+		 0x01 0xb0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&usb2phy_ac_en3_default>;
 	status = "ok";
 };
 
@@ -401,6 +432,11 @@
 	vdd-supply = <&pm8195_3_l5>;
 	vdda18-supply = <&pm8195_1_l12>;
 	vdda33-supply = <&pm8195_3_l16>;
+	qcom,param-override-seq =
+		<0x43 0x70
+		 0x01 0xb0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&usb2phy_ac_en4_default>;
 	status = "ok";
 };
 
