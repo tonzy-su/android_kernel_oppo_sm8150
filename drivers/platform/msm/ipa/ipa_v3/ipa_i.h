@@ -105,6 +105,7 @@
 
 /* Default aggregation timeout for WAN/LAN pipes. */
 #define IPA_GENERIC_AGGR_TIME_LIMIT 500 /* 0.5msec */
+#define IPA_RNDIS_DEFAULT_AGGR_TIME_LIMIT 1000 /* 1msec */
 
 #define WLAN_IPA_CONNECT_EVENT(m) (m == WLAN_STA_CONNECT || \
 	m == WLAN_AP_CONNECT || \

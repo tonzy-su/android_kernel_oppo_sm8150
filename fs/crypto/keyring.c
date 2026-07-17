@@ -20,6 +20,7 @@
 
 #include <crypto/skcipher.h>
 #include <linux/key-type.h>
+#include <linux/random.h>
 #include <linux/seq_file.h>
 
 #include "fscrypt_private.h"
@@ -463,6 +464,34 @@ retry:
 	}
 out_unlock:
 	mutex_unlock(&fscrypt_add_key_mutex);
+	return err;
+}
+
+/*
+ * fscrypt_add_test_dummy_key - add a test dummy encryption key to the FS keyring
+ * @sb: the filesystem instance
+ * @key_spec: the key specifier
+ *
+ * Generate a per-boot random dummy key and add it to the filesystem's keyring.
+ * This is used to support test_dummy_encryption when the FS uses v2 policies,
+ * which require keys in the FS keyring (not the session keyring).
+ *
+ * Adapted from upstream fscrypt commit 6dc3cb5f238a for OPPO's fscrypt which
+ * uses FSCRYPT_MAX_HW_WRAPPED_KEY_SIZE for the raw buffer size and lacks
+ * get_random_once().
+ */
+int fscrypt_add_test_dummy_key(struct super_block *sb,
+			       struct fscrypt_key_specifier *key_spec)
+{
+	struct fscrypt_master_key_secret secret;
+	int err;
+
+	memset(&secret, 0, sizeof(secret));
+	secret.size = FSCRYPT_MAX_KEY_SIZE;
+	get_random_bytes(secret.raw, secret.size);
+
+	err = add_master_key(sb, &secret, key_spec);
+	wipe_master_key_secret(&secret);
 	return err;
 }
 
