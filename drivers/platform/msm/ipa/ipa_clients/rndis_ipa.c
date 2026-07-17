@@ -29,6 +29,7 @@
 #include <linux/workqueue.h>
 #include "../ipa_common_i.h"
 #include "../ipa_v3/ipa_pm.h"
+#include "../ipa_v3/ipa_i.h"
 
 #define CREATE_TRACE_POINTS
 #include "rndis_ipa_trace.h"

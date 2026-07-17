@@ -256,7 +256,6 @@ struct ipa_api_controller {
 	int (*ipa_eth_client_disconn_evt)(struct ipa_ecm_msg *msg);
 
 	u16 (*ipa_get_smem_restr_bytes)(void);
-
 	int (*ipa_broadcast_wdi_quota_reach_ind)(uint32_t fid,
 		uint64_t num_bytes);
 
@@ -536,6 +535,30 @@ struct ipa_api_controller {
 	int (*ipa_get_default_aggr_time_limit)(enum ipa_client_type client,
 		u32 *default_aggr_time_limit);
 };
+
+int ipa_eth_rtk_connect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_aqc_connect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_emac_connect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_rtk_disconnect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_aqc_disconnect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_emac_disconnect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
 
 #ifdef CONFIG_IPA
 int ipa_plat_drv_probe(struct platform_device *pdev_p,

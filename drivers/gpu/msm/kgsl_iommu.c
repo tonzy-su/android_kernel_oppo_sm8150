@@ -854,7 +854,7 @@ static int kgsl_iommu_fault_handler(struct iommu_domain *domain,
 	if (pt->name == KGSL_MMU_SECURE_PT)
 		ctx = &iommu->ctx[KGSL_IOMMU_CONTEXT_SECURE];
 
-	ctx->fault = 1;
+	ctx->stalled_on_fault = true;
 
 	if (test_bit(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE,
 		&adreno_dev->ft_pf_policy) &&
@@ -2102,7 +2102,7 @@ static void kgsl_iommu_pagefault_resume(struct kgsl_mmu *mmu)
 	struct kgsl_iommu_context *ctx = &iommu->ctx[KGSL_IOMMU_CONTEXT_USER];
 	unsigned int fsr_val;
 
-	if (ctx->default_pt != NULL && ctx->fault) {
+	if (ctx->default_pt != NULL && ctx->stalled_on_fault) {
 		while (1) {
 			KGSL_IOMMU_SET_CTX_REG(ctx, FSR, 0xffffffff);
 			/*
@@ -2129,7 +2129,7 @@ static void kgsl_iommu_pagefault_resume(struct kgsl_mmu *mmu)
 			if (!(fsr_val & (1 << KGSL_IOMMU_FSR_SS_SHIFT)))
 				break;
 		}
-		ctx->fault = 0;
+		ctx->stalled_on_fault = false;
 	}
 }
 
@@ -2646,7 +2646,7 @@ static int kgsl_iommu_svm_range(struct kgsl_pagetable *pagetable,
 }
 
 static bool kgsl_iommu_addr_in_range(struct kgsl_pagetable *pagetable,
-		uint64_t gpuaddr)
+		uint64_t gpuaddr, uint64_t size)
 {
 	struct kgsl_iommu_pt *pt = pagetable->priv;
 

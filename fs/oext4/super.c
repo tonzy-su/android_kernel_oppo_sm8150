@@ -1295,9 +1295,12 @@ retry:
 	return res;
 }
 
-static bool ext4_dummy_context(struct inode *inode)
+static const union fscrypt_context *
+ext4_dummy_context(struct super_block *sb)
 {
-	return DUMMY_ENCRYPTION_ENABLED(EXT4_SB(inode->i_sb));
+	if (DUMMY_ENCRYPTION_ENABLED(EXT4_SB(sb)))
+		return (const union fscrypt_context *)1;
+	return NULL;
 }
 
 static bool ext4_has_stable_inodes(struct super_block *sb)
@@ -1321,7 +1324,7 @@ static const struct fscrypt_operations ext4_cryptops = {
 	.key_prefix		= "ext4:",
 	.get_context		= ext4_get_context,
 	.set_context		= ext4_set_context,
-	.dummy_context		= ext4_dummy_context,
+	.get_dummy_context	= ext4_dummy_context,
 	.empty_dir		= ext4_empty_dir,
 	.max_namelen		= EXT4_NAME_LEN,
 	.has_stable_inodes	= ext4_has_stable_inodes,

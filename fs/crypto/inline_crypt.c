@@ -45,7 +45,7 @@ static void fscrypt_get_devices(struct super_block *sb, int num_devs,
 
 #define SDHCI "sdhci"
 
-static int fscrypt_find_storage_type(char **device)
+int fscrypt_find_storage_type(char **device)
 {
 	char boot[20] = {'\0'};
 	char *match = (char *)strnstr(saved_command_line,
