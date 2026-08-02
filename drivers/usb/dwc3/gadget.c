@@ -412,22 +412,35 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	 * DWC_usb3 3.30a and DWC_usb31 1.90a programming guide section 3.2.2
 	 */
 	if (dwc->gadget.speed <= USB_SPEED_HIGH) {
-		reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
-		if (unlikely(reg & DWC3_GUSB2PHYCFG_SUSPHY)) {
-			saved_config |= DWC3_GUSB2PHYCFG_SUSPHY;
-			reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+			reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+			if (unlikely(reg & DWC3_GUSB2PHYCFG_SUSPHY)) {
+				saved_config |= DWC3_GUSB2PHYCFG_SUSPHY;
+				reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+			}
+
+			if (reg & DWC3_GUSB2PHYCFG_ENBLSLPM) {
+				saved_config |= DWC3_GUSB2PHYCFG_ENBLSLPM;
+				reg &= ~DWC3_GUSB2PHYCFG_ENBLSLPM;
+			}
+
+			if (saved_config)
+				dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 		}
 
-		if (reg & DWC3_GUSB2PHYCFG_ENBLSLPM) {
-			saved_config |= DWC3_GUSB2PHYCFG_ENBLSLPM;
-			reg &= ~DWC3_GUSB2PHYCFG_ENBLSLPM;
+		if (DWC3_DEPCMD_CMD(cmd) == DWC3_DEPCMD_STARTTRANSFER) {
+			int link_state;
+
+			link_state = dwc3_gadget_get_link_state(dwc);
+			if (link_state == DWC3_LINK_STATE_U1 ||
+			    link_state == DWC3_LINK_STATE_U2 ||
+			    link_state == DWC3_LINK_STATE_U3) {
+				ret = dwc3_gadget_wakeup_int(dwc);
+				dev_WARN_ONCE(dwc->dev, ret, "wakeup failed --> %d\n",
+					      ret);
+			}
 		}
 
-		if (saved_config)
-			dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
-	}
-
-	dwc3_writel(dep->regs, DWC3_DEPCMDPAR0, params->param0);
+		dwc3_writel(dep->regs, DWC3_DEPCMDPAR0, params->param0);
 	dwc3_writel(dep->regs, DWC3_DEPCMDPAR1, params->param1);
 	dwc3_writel(dep->regs, DWC3_DEPCMDPAR2, params->param2);
 
