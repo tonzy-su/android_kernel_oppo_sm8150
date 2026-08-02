@@ -25,15 +25,24 @@
 
 | 文件 | 锁定原因 | 错误发生版本 |
 |------|---------|-----------|
-| `fs/incfs/*` + `include/uapi/linux/incrementalfs.h` | oppo 私有设计 vs upstream 重构 | 4.14.210-218 |
-| `drivers/dma-buf/dma-buf.c` | oppo 私有 helper 函数（partial/get_flags）| 4.14.222 |
-| `drivers/usb/dwc3/gadget.{c,h}` + `dwc3-msm.c` | oppo extern 函数 vs upstream static | 4.14.233 |
-| `drivers/gpu/drm/msm/msm_drv.{c,h}` | oppo vblank_work/kthread 设计 | 4.14.228 |
-| `net/qrtr/qrtr.c` | oppo v1/v2 vs upstream phdr | 4.14.227 |
-| `drivers/usb/gadget/function/f_uac*` | oppo 私有声明 | 4.14.215, 4.14.233 |
-| `drivers/soc/oplus/**`, `techpack/**` | oppo 厂商代码 | （持续）|
+| `fs/incfs/*` + `include/uapi/linux/incrementalfs.h` | opho 私有设计 vs upstream 重构 | 4.14.210-218 |
+| `drivers/dma-buf/dma-buf.c` | opho 私有 helper 函数（partial/get_flags）| 4.14.222 |
+| `drivers/usb/dwc3/gadget.{c,h}` + `dwc3-msm.c` | opho extern 函数 vs upstream static | 4.14.233 |
+| `drivers/usb/dwc3/core.c` | opho 旧清理函数 vs upstream 新 API | 4.14.238 |
+| `drivers/gpu/drm/msm/msm_drv.{c,h}` | opho vblank_work/kthread 设计 | 4.14.228 |
+| `net/qrtr/qrtr.c` | opho v1/v2 vs upstream phdr | 4.14.227 |
+| `kernel/sched/fair.c` | opho `cpu_isolated()` 检查 | 4.14.236 |
+| `kernel/cgroup/cgroup.c` | opho `OPT_FEATURE_COUNT` 机制 | 4.14.237 |
+| `fs/crypto/fname.c` | opho `fscrypt_nokey_name` vs upstream `digest_encode` | 4.14.240 |
+| `fs/fs-writeback.c` | opho `block_dump___mark_inode_dirty` debug | 4.14.240 |
+| `drivers/usb/gadget/function/f_uac*` | opho 私有声明 | 4.14.215, 4.14.233 |
+| `drivers/soc/oplus/**`, `techpack/**` | opho 厂商代码 | （持续）|
 
-> ⚠️ **绝对不要**对以上文件使用 `git checkout --theirs`。
+> ⚠️ **绝对不要**对以上文件使用 `git checkout --theirs`（除 `drivers/usb/core/hub.c` 之外，它在 Tier 2b 中明确取 theirs）。
+
+> ⚠️ **drivers/usb/core/hub.c 标记为 `merge=theirs`** — 特殊例外。当 upstream
+> 包含 race condition 修复时（如 4.14.233 的 `d34cab87d2fb`），必须取 theirs。
+> 默认应该是 ours，但 hub.c 的 opho 10ms 延迟被 upstream 明确标记为 bug。
 
 ---
 
@@ -51,9 +60,13 @@
   │
   ├── local 已有 opho 私有实现，upstream 想替换
   │   ├─ upstream 是新设计（删除旧函数）→ 永远 `merge=ours`
-  │   └─ upstream 是兼容性增强（添加 NULL check）→ 手商，保留双侧
+  │   ├─ upstream 是兼容性增强（添加 NULL check）→ 手商，保留双侧
+  │   ├─ upstream 是 race condition 修复 → `merge=theirs` ⚠️
+  │   └─ upstream 是 whitespace 调整 → 任何选择都行
   │   例：4.14.228 的 msm_pdev_shutdown（ours 更安全）
   │   例：4.14.226 的 mmc part_time + cmdq（手商）
+  │   例：4.14.233 的 hub.c TRSMRCY（theirs - 关键！）
+  │   例：4.14.240 的 sm_make_chunk.c / avc.c（whitespace）
   │
   └── local 与 upstream 都在同一位置有不同实现
       ├─ 同方向（都加了某函数）→ 手商
@@ -93,6 +106,19 @@
 - **后果**：11 个 undeclared 错误（`ver`, `size`, `type`, `dst`, `psize` 等）
 - **修复**：删除 upstream 验证，保留 oppo `alloc_skb_with_frags`
 - **教训**：手商时检查上下文中 local 的变量名
+
+### 案例 5：4.14.233 `hub.c` 10ms TRSMRCY（**严重 - 运行时崩溃**）
+- **错误**：4.14.233 合并时取 ours，保留了 opho 的 10ms `usleep_range()`
+- **后果**：USB 设备连接时内核崩溃重启（4.14.235 上发生）
+- **根因**：upstream commit `d34cab87d2fb` 明确说明这是 **race condition**，
+  10ms 等待是 unneeded。upstream 把它移到 SuspendCleared 段
+- **修复**：commit `e5012688c1af` 删除错误位置的 10ms 延迟
+- **教训**：
+  - **opho 私有 ≠ 正确**：vendor 可能有"workaround"代码但实际上是 bug
+  - 合并前要看 upstream commit message（`git log --grep "race" 4.14-stable`）
+  - 4.14.233 包含多个 USB 关键 fix（dwc3、xhci、hub），不能盲目保留
+- **.git/info/attributes 修正**：把 `drivers/usb/core/hub.c` 改为 `merge=theirs`
+  （罕见但需要 - 当 upstream 是 race condition 修复时）
 
 ---
 
