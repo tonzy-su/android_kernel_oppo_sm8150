@@ -548,7 +548,7 @@
 	};
 
 	chosen {
-		bootargs = "rcupdate.rcu_expedited=1 rcu_nocbs=0-7 cgroup.memory=nokmem,nosocket";
+		bootargs = "rcupdate.rcu_expedited=1 rcu_nocbs=0-7 cgroup.memory=nokmem,nosocket ramoops.ecc=1";
 	};
 
 	soc: soc { };
@@ -776,7 +776,7 @@
 		};
 		// #ifdef OPLUS_BUG_STABILITY
 		// #endif
-		ramoops: ramoops@0x0xB7E00000 {
+		ramoops: ramoops@0xB7E00000 {
 			compatible = "ramoops";
 			reg = <0 0xB7E00000 0 0x00400000>;
 			record-size =  <0x40000>; //256x1024
