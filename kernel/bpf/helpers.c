@@ -115,6 +115,7 @@ const struct bpf_func_proto bpf_ktime_get_ns_proto = {
 	.gpl_only	= false,
 	.ret_type	= RET_INTEGER,
 };
+
 BPF_CALL_0(bpf_ktime_get_boot_ns)
 {
 	/* NMI safe access to clock boottime */
