@@ -50,6 +50,10 @@ make -j${THREADS} -C $(pwd) O=${OUT_DIR} \
     CC=clang \
     $DEFCONFIG
 
+# 记录构建开始时间,稍后用于校验 Image-dtb 是否在本次构建中重新生成
+BUILD_START=$(date +%s)
+echo "Build start epoch: $BUILD_START"
+
 # --- 步骤 2: 编译内核 ---
 make -j${THREADS} -C $(pwd) O=${OUT_DIR} \
     CROSS_COMPILE=$BUILD_CROSS_COMPILE \
@@ -78,6 +82,29 @@ if [ ! -f $OUT_DIR/arch/arm64/boot/Image-dtb ]; then
     echo "=========================================="
     exit 1
 fi
+
+# --- 校验 Image-dtb 是本次构建产物(非旧版本) ---
+# 沙箱环境下 make 可能因缓存跳过 Image-dtb 重生成,导致 AK3 包内是上次的旧镜像
+# 校验方法:Image-dtb mtime >= BUILD_START (即在本次构建期间被写入)
+if [ "$(uname)" = "Linux" ]; then
+    IMG_MTIME=$(stat -c %Y $OUT_DIR/arch/arm64/boot/Image-dtb 2>/dev/null)
+else
+    IMG_MTIME=$(stat -f %m $OUT_DIR/arch/arm64/boot/Image-dtb 2>/dev/null)
+fi
+if [ -n "$IMG_MTIME" ] && [ "$IMG_MTIME" -lt "$BUILD_START" ]; then
+    echo "=========================================="
+    echo "FATAL: Image-dtb mtime ($IMG_MTIME) is BEFORE build start ($BUILD_START)!"
+    echo "  The build did NOT regenerate Image-dtb (likely due to make cache)."
+    echo "  Packaging the stale Image-dtb would deliver an old kernel to the device."
+    echo "  Solutions:"
+    echo "    1. touch arch/arm64/boot/dts/qcom/sm8150.dtb to force DTB rebuild"
+    echo "    2. rm -f $OUT_DIR/arch/arm64/boot/Image-dtb and re-run"
+    echo "    3. make clean (slow) then re-run"
+    echo "=========================================="
+    exit 1
+fi
+IMG_MTIME_HUMAN=$(date -d @$IMG_MTIME "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
+echo "Image-dtb mtime: $IMG_MTIME_HUMAN (build started: $(date -d @$BUILD_START "+%Y-%m-%d %H:%M:%S"))"
 
 echo "=========================================="
 echo "BUILD SUCCESS"
