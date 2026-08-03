@@ -144,7 +144,7 @@ struct data_file *incfs_open_data_file(struct mount_info *mi, struct file *bf)
 	if (!S_ISREG(bf->f_inode->i_mode))
 		return ERR_PTR(-EBADF);
 
-	bfc = incfs_alloc_bfc(bf);
+	bfc = incfs_alloc_bfc(mi, bf);
 	if (IS_ERR(bfc))
 		return ERR_CAST(bfc);
 
@@ -388,8 +388,8 @@ static void log_block_read(struct mount_info *mi, incfs_uuid_t *id,
 	schedule_delayed_work(&log->ml_wakeup_work, msecs_to_jiffies(16));
 }
 
-static int validate_hash_tree(struct file *bf, struct file *f, int block_index,
-			      struct mem_range data, u8 *buf)
+static int validate_hash_tree(struct backing_file_context *bf, struct file *f,
+			      int block_index, struct mem_range data, u8 *buf)
 {
 	struct data_file *df = get_incfs_data_file(f);
 	u8 stored_digest[INCFS_MAX_HASH_SIZE] = {};
@@ -919,7 +919,7 @@ ssize_t incfs_read_data_file_block(struct mem_range dst, struct file *f,
 	ssize_t result;
 	size_t bytes_to_read;
 	struct mount_info *mi = NULL;
-	struct file *bf = NULL;
+	struct backing_file_context *bf = NULL;
 	struct data_file_block block = {};
 	struct data_file *df = get_incfs_data_file(f);
 
@@ -930,7 +930,7 @@ ssize_t incfs_read_data_file_block(struct mem_range dst, struct file *f,
 		return -ERANGE;
 
 	mi = df->df_mount_info;
-	bf = df->df_backing_file_context->bc_file;
+	bf = df->df_backing_file_context;
 
 	result = wait_for_data_block(df, index, timeout_ms, &block);
 	if (result < 0)
@@ -952,7 +952,7 @@ ssize_t incfs_read_data_file_block(struct mem_range dst, struct file *f,
 				decompress(range(tmp.data, bytes_to_read), dst);
 			if (result < 0) {
 				const char *name =
-					bf->f_path.dentry->d_name.name;
+					bf->bc_file->f_path.dentry->d_name.name;
 
 				pr_warn_once("incfs: Decompression error. %s",
 					     name);
@@ -1034,7 +1034,7 @@ unlock:
 
 int incfs_read_file_signature(struct data_file *df, struct mem_range dst)
 {
-	struct file *bf = df->df_backing_file_context->bc_file;
+	struct backing_file_context *bf = df->df_backing_file_context;
 	struct incfs_df_signature *sig;
 	int read_res = 0;
 
@@ -1174,7 +1174,7 @@ static int process_file_signature_md(struct incfs_file_signature *sg,
 		goto out;
 	}
 
-	read = incfs_kread(df->df_backing_file_context->bc_file, buf,
+	read = incfs_kread(df->df_backing_file_context, buf,
 			   signature->sig_size, signature->sig_offset);
 	if (read < 0) {
 		error = read;

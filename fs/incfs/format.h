@@ -110,6 +110,9 @@
 
 #include "internal.h"
 
+struct mount_info; /* forward decl - defined in data_mgmt.h */
+struct cred;       /* forward decl - for OPPO credential override */
+
 #define INCFS_MAX_NAME_LEN 255
 #define INCFS_FORMAT_V1 1
 #define INCFS_FORMAT_CURRENT_VER INCFS_FORMAT_V1
@@ -252,6 +255,14 @@ struct backing_file_context {
 	struct file *bc_file;
 
 	/*
+	 * Cred of the mount owner. Used to override the kernel's
+	 * credentials when performing I/O on the backing file, so
+	 * that on-disk ownership / SELinux context matches the
+	 * original creator (OPPO-specific behaviour).
+	 */
+	const struct cred *bc_cred;
+
+	/*
 	 * Offset of the last known metadata record in the backing file.
 	 * 0 means there are no metadata records.
 	 */
@@ -283,7 +294,8 @@ struct metadata_handler {
 loff_t incfs_get_end_offset(struct file *f);
 
 /* Backing file context management */
-struct backing_file_context *incfs_alloc_bfc(struct file *backing_file);
+struct backing_file_context *incfs_alloc_bfc(struct mount_info *mi,
+					     struct file *backing_file);
 
 void incfs_free_bfc(struct backing_file_context *bfc);
 
@@ -334,7 +346,9 @@ int incfs_read_blockmap_entries(struct backing_file_context *bfc,
 int incfs_read_next_metadata_record(struct backing_file_context *bfc,
 				    struct metadata_handler *handler);
 
-ssize_t incfs_kread(struct file *f, void *buf, size_t size, loff_t pos);
-ssize_t incfs_kwrite(struct file *f, const void *buf, size_t size, loff_t pos);
+ssize_t incfs_kread(struct backing_file_context *bfc, void *buf,
+		    size_t size, loff_t pos);
+ssize_t incfs_kwrite(struct backing_file_context *bfc, const void *buf,
+		     size_t size, loff_t pos);
 
 #endif /* _INCFS_FORMAT_H */
