@@ -42,6 +42,12 @@
 Module.symvers
 modules.builtin
 
+# AK3 build artifacts (top-level only)
+/build.txt
+/*.zip
+# Top-level markdown notes (skill.md, mem*.md, etc.) - not source code
+/*.md
+
 #
 # Top-level generic files
 #
