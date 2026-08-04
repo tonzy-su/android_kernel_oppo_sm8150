@@ -6764,7 +6764,16 @@ put_ref:
 	while (planes)
 		msm_smem_put_dma_buf((struct dma_buf *)dma_planes[--planes]);
 
-	return rc ? ERR_PTR(rc) : mbuf;
+	/*
+	 * Return mbuf if decode batching is enabled as this buffer
+	 * may trigger queuing full batch to firmware, also this buffer
+	 * will not be queued to firmware while full batch queuing,
+	 * it will be queued when rbr event arrived from firmware.
+	 */
+	if (rc == -EEXIST && !inst->batch.enable)
+		return ERR_PTR(rc);
+
+	return mbuf;
 }
 
 void msm_comm_put_vidc_buffer(struct msm_vidc_inst *inst,

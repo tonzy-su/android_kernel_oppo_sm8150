@@ -94,14 +94,13 @@ static char *dmabuffs_dname(struct dentry *dentry, char *buffer, int buflen)
 			     dentry->d_name.name, ret > 0 ? name : "");
 }
 
-static int dma_buf_release(struct inode *inode, struct file *file)
+static void dma_buf_release(struct dentry *dentry)
 {
 	struct dma_buf *dmabuf;
 
-	if (!is_dma_buf_file(file))
-		return -EINVAL;
-
-	dmabuf = file->private_data;
+	dmabuf = dentry->d_fsdata;
+	if (unlikely(!dmabuf))
+		return;
 
 	BUG_ON(dmabuf->vmapping_counter);
 
@@ -124,7 +123,6 @@ static int dma_buf_release(struct inode *inode, struct file *file)
 	module_put(dmabuf->owner);
 	kfree(dmabuf->buf_name); /* OPPO: field is buf_name, not name */
 	kfree(dmabuf);
-	return 0;
 }
 
 static int dma_buf_file_release(struct inode *inode, struct file *file)
@@ -145,6 +143,7 @@ static int dma_buf_file_release(struct inode *inode, struct file *file)
 
 static const struct dentry_operations dma_buf_dentry_ops = {
 	.d_dname = dmabuffs_dname,
+	.d_release = dma_buf_release,
 };
 
 static struct vfsmount *dma_buf_mnt;
