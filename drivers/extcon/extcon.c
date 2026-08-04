@@ -1309,8 +1309,8 @@ int extcon_dev_register(struct extcon_dev *edev)
 		}
 	}
 
-	edev->bnh = devm_kzalloc(&edev->dev,
-			sizeof(*edev->bnh) * edev->max_supported, GFP_KERNEL);
+	edev->bnh = kcalloc(edev->max_supported, sizeof(*edev->bnh),
+			GFP_KERNEL);
 	if (!edev->bnh) {
 		ret = -ENOMEM;
 		goto err_dev;
@@ -1337,6 +1337,7 @@ int extcon_dev_register(struct extcon_dev *edev)
 	return 0;
 
 err_dev:
+	kfree(edev->bnh);
 	if (edev->max_supported)
 		kfree(edev->nh);
 err_alloc_nh:
@@ -1397,6 +1398,7 @@ void extcon_dev_unregister(struct extcon_dev *edev)
 	for (index = 0; index < edev->max_supported; index++)
 		kfree(edev->cables[index].attr_g.name);
 
+	kfree(edev->bnh);
 	if (edev->max_supported) {
 		kfree(edev->extcon_dev_type.groups);
 		kfree(edev->cables);
