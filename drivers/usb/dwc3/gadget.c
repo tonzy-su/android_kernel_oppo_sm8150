@@ -3959,19 +3959,6 @@ static irqreturn_t dwc3_check_event_buf(struct dwc3_event_buffer *evt)
 		return IRQ_NONE;
 
 	dwc = evt->dwc;
-
-	if (pm_runtime_suspended(dwc->dev)) {
-		dwc->pending_events = true;
-		/*
-		 * Trigger runtime resume. The get() function will be balanced
-		 * after processing the pending events in dwc3_process_pending
-		 * events().
-		 */
-		pm_runtime_get(dwc->dev);
-		disable_irq_nosync(dwc->irq_gadget);
-		return IRQ_HANDLED;
-	}
-
 	start_time = ktime_get();
 	dwc->irq_cnt++;
 
@@ -4252,8 +4239,6 @@ void dwc3_gadget_process_pending_events(struct dwc3 *dwc)
 {
 	if (dwc->pending_events) {
 		dwc3_interrupt(dwc->irq_gadget, dwc->ev_buf);
-		dwc3_thread_interrupt(dwc->irq_gadget, dwc->ev_buf);
-		pm_runtime_put(dwc->dev);
 		dwc->pending_events = false;
 		enable_irq(dwc->irq_gadget);
 	}
