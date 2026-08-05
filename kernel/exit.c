@@ -118,7 +118,6 @@ static __init int kernel_exit_sysfs_init(void)
 }
 late_initcall(kernel_exit_sysfs_init);
 #endif
-#endif
 
 static void __unhash_process(struct task_struct *p, bool group_dead)
 {
