@@ -870,11 +870,14 @@ void add_hwgenerator_randomness(const void *buf, size_t len, size_t entropy)
 	credit_init_bits(entropy);
 
 	/*
-	 * Throttle writing to once every CRNG_RESEED_INTERVAL, unless
-	 * we're not yet initialized.
+	 * Throttle disabled.  Upstream's 60s sleep here is unsafe on this
+	 * platform: OPPO's init_random_pool() (setup_arch) and the qcom_rng
+	 * hwrng probe credit enough entropy to make crng_ready() true very
+	 * early, so the throttle sleep trips the hardware watchdog during the
+	 * boot window and the device reboots in a loop.  The entropy pool is
+	 * periodically reseeded anyway via crng_reseed(), so dropping the
+	 * sleep has no security impact.
 	 */
-	if (!kthread_should_stop() && crng_ready())
-		schedule_timeout_interruptible(CRNG_RESEED_INTERVAL);
 }
 EXPORT_SYMBOL_GPL(add_hwgenerator_randomness);
 
