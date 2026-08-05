@@ -2602,6 +2602,7 @@ static int __net_init tcp_sk_init(struct net *net)
 	#ifdef OPLUS_BUG_STABILITY
 	net->ipv4.sysctl_tcp_random_timestamp = 1;
 	#endif /* OPLUS_BUG_STABILITY */
+	net->ipv4.sysctl_tcp_early_retrans = 3;
 
 	return 0;
 fail:
