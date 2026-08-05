@@ -239,7 +239,7 @@ bool oem_is_fulldump(void)
 {
 	return download_mode && (dload_type & SCM_DLOAD_FULLDUMP);
 }
-EXPORT_SYMBOL(oem_is_fulldump);
+EXPORT_SYMBOL_GPL(oem_is_fulldump);
 #endif /* OPLUS_FEATURE_ADSP_RECOVERY */
 
 static void enable_emergency_dload_mode(void)

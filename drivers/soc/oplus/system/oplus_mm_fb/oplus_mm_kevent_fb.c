@@ -269,7 +269,7 @@ _exit:
 	mutex_unlock(&mm_kevent_lock);
 	return 0;
 }
-EXPORT_SYMBOL(upload_mm_fb_kevent_to_atlas_limit);
+EXPORT_SYMBOL_GPL(upload_mm_fb_kevent_to_atlas_limit);
 
 #define MM_FB_EVENTID_LEN   5
 #define MM_FB_HAL_LIMIT    (60*1000)

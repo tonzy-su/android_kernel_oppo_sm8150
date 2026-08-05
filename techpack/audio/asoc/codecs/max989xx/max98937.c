@@ -1884,7 +1884,7 @@ void max98927_LR_reset(void)
 		pr_info("%s: reseted two smartpa!\n", __func__);
 	}
 }
-EXPORT_SYMBOL(max98927_LR_reset);
+EXPORT_SYMBOL_GPL(max98927_LR_reset);
 
 extern void reset_pm8008_max98927(void);
 
