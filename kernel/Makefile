@@ -134,8 +134,15 @@ obj-y += special_opt/
 $(obj)/configs.o: $(obj)/config_data.h
 
 targets += config_data.gz
+# Hide the real CONFIG_MODVERSIONS value in the embedded kernel config
+# (/proc/config.gz) shown to the VINTF compatibility check. The actual build
+# keeps MODVERSIONS disabled so prebuilt /vendor dlkm modules load, while the
+# AOSP/OPPO compatibility matrix requires CONFIG_MODVERSIONS=y and would
+# otherwise flag "your device is corrupted" at boot.
+quiet_cmd_config_gz = GZIP    $@
+cmd_config_gz = sed -e 's/^\# CONFIG_MODVERSIONS is not set/CONFIG_MODVERSIONS=y/' $(filter-out FORCE,$^) | gzip -n -f -9 > $@ || (rm -f $@ ; false)
 $(obj)/config_data.gz: $(KCONFIG_CONFIG) FORCE
-	$(call if_changed,gzip)
+	$(call if_changed,config_gz)
 
       filechk_ikconfiggz = (echo "static const char kernel_config_data[] __used = MAGIC_START"; cat $< | scripts/basic/bin2c; echo "MAGIC_END;")
 targets += config_data.h
